@@ -4,19 +4,25 @@
     "private": true,
     "repository": "https://github.com/kevin062397/TampermonkeyMarkdownEnhancer",
     "license": "UNLICENSED",
+    "type": "module",
     "scripts": {
         "prebuild": "npm run format",
-        "build": "tsc",
+        "build": "vite build && npm run validate:build",
         "check-format": "prettier --check .",
         "clean": "rm -rf dist",
+        "dev": "vite",
         "format": "prettier --write .",
         "pretest": "npm run check-format",
-        "test": "echo OK"
+        "test": "echo OK",
+        "validate:build": "node scripts/validate-build.mjs"
     },
     "devDependencies": {
+        "@types/tampermonkey": "^5.5.0",
         "prettier": "^3.9.9",
         "prettier-plugin-organize-imports": "^4.3.0",
         "prettier-plugin-packagejson": "^3.0.2",
-        "typescript": "^7.0.2"
+        "typescript": "^7.0.2",
+        "vite": "^8.3.1",
+        "vite-plugin-monkey": "^8.1.1"
     }
 }

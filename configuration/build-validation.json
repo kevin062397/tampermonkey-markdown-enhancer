@@ -1,0 +1,15 @@
+{
+    "artifacts": ["index.meta.js", "index.user.js"],
+    "expectedMetadata": {
+        "author": ["Haoyuan Kevin Xia"],
+        "description": ["Enhance Markdown editing experience."],
+        "grant": ["none"],
+        "match": ["*"],
+        "name": ["Markdown Enhancer"],
+        "namespace": ["https://github.com/kevin062397/TampermonkeyMarkdownEnhancer"],
+        "version": ["1.5.0"]
+    },
+    "requiredMetadata": ["icon", "icon64"],
+    "runtimeMarkers": ["markdownEnhancerAttached", "MutationObserver", "addEventListener"],
+    "sourceEntry": "src/index.user.ts"
+}
