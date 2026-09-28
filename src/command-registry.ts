@@ -1,9 +1,10 @@
-import { toggleWrapCommand } from "./commands";
+import { insertMarkdownLinkCommand, toggleWrapCommand } from "./commands";
 
-export const FORMAT_COMMAND_IDS = {
+export const EDITOR_COMMAND_IDS = {
     bold: "format.bold",
     inlineCode: "format.inlineCode",
     italic: "format.italic",
+    link: "insert.link",
     strikethrough: "format.strikethrough"
 } as const;
 
@@ -63,16 +64,23 @@ const createFormattingCommand = (
 });
 
 const createCoreCommands = (): readonly EditorCommand[] => [
-    createFormattingCommand(FORMAT_COMMAND_IDS.bold, "Bold", "**", {
+    createFormattingCommand(EDITOR_COMMAND_IDS.bold, "Bold", "**", {
         key: "b",
         isPrimaryModifierRequired: true
     }),
-    createFormattingCommand(FORMAT_COMMAND_IDS.italic, "Italic", "*", {
+    createFormattingCommand(EDITOR_COMMAND_IDS.italic, "Italic", "*", {
         key: "i",
         isPrimaryModifierRequired: true
     }),
-    createFormattingCommand(FORMAT_COMMAND_IDS.strikethrough, "Strikethrough", "~~"),
-    createFormattingCommand(FORMAT_COMMAND_IDS.inlineCode, "Inline code", "`")
+    createFormattingCommand(EDITOR_COMMAND_IDS.strikethrough, "Strikethrough", "~~"),
+    createFormattingCommand(EDITOR_COMMAND_IDS.inlineCode, "Inline code", "`"),
+    {
+        id: EDITOR_COMMAND_IDS.link,
+        label: "Link",
+        shortcut: { key: "k", isPrimaryModifierRequired: true },
+        isAvailable: isFormattingAvailable,
+        execute: ({ textArea }) => insertMarkdownLinkCommand(textArea)
+    }
 ];
 
 export const createCommandRegistry = (additionalCommands: readonly EditorCommand[] = []): EditorCommandRegistry => {

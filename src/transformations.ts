@@ -284,13 +284,72 @@ export const outdentSelectedLines = (state: EditorState, tabSize: number): EditO
 
 export const isHyperlink = (text: string): boolean => /^(https?:\/\/|ftp:\/\/|mailto:)[^\s]+$/i.test(text.trim());
 
-export const createMarkdownLink = (state: EditorState, pasteText: string): EditOperation | null => {
-    if (state.selectionStart === state.selectionEnd || !isHyperlink(pasteText)) {
+export const escapeMarkdownLinkLabel = (label: string): string =>
+    label.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+
+export const escapeMarkdownLinkDestination = (destination: string): string =>
+    destination
+        .replace(/\\/g, "\\\\")
+        .replace(/\(/g, "\\(")
+        .replace(/\)/g, "\\)")
+        .replace(/</g, "%3C")
+        .replace(/>/g, "%3E");
+
+export const createMarkdownLinkFromPaste = (state: EditorState, pasteText: string): EditOperation | null => {
+    const contentState = getNonWhitespaceSelection(state);
+    if (!contentState || !isHyperlink(pasteText)) {
         return null;
     }
 
-    const selectedText = state.value.slice(state.selectionStart, state.selectionEnd);
-    const text = `[${selectedText}](${pasteText.trim()})`;
-    const cursor = state.selectionStart + text.length;
-    return createEdit(state, state.selectionStart, state.selectionEnd, text, cursor, cursor, "none");
+    const label = escapeMarkdownLinkLabel(
+        contentState.value.slice(contentState.selectionStart, contentState.selectionEnd)
+    );
+    const destination = escapeMarkdownLinkDestination(pasteText.trim());
+    const text = `[${label}](${destination})`;
+    const cursor = contentState.selectionStart + text.length;
+    return createEdit(
+        contentState,
+        contentState.selectionStart,
+        contentState.selectionEnd,
+        text,
+        cursor,
+        cursor,
+        "none"
+    );
+};
+
+export const createMarkdownLinkFromSelection = (state: EditorState): EditOperation | null => {
+    const contentState = getNonWhitespaceSelection(state);
+    if (!contentState) {
+        return null;
+    }
+
+    const selectedText = contentState.value.slice(contentState.selectionStart, contentState.selectionEnd);
+    if (isHyperlink(selectedText)) {
+        const labelPlaceholder = "link text";
+        const destination = escapeMarkdownLinkDestination(selectedText.trim());
+        const text = `[${labelPlaceholder}](${destination})`;
+        const selectionStart = contentState.selectionStart + 1;
+        return createEdit(
+            contentState,
+            contentState.selectionStart,
+            contentState.selectionEnd,
+            text,
+            selectionStart,
+            selectionStart + labelPlaceholder.length
+        );
+    }
+
+    const label = escapeMarkdownLinkLabel(selectedText);
+    const destinationPlaceholder = "url";
+    const text = `[${label}](${destinationPlaceholder})`;
+    const selectionStart = contentState.selectionStart + label.length + 3;
+    return createEdit(
+        contentState,
+        contentState.selectionStart,
+        contentState.selectionEnd,
+        text,
+        selectionStart,
+        selectionStart + destinationPlaceholder.length
+    );
 };

@@ -208,8 +208,29 @@ describe("Markdown Enhancer", () => {
         textArea.value = "   ";
         textArea.setSelectionRange(0, 3);
         const whitespaceEvent = dispatchShortcut(textArea, "i");
+        const linkEvent = dispatchShortcut(textArea, "k");
         expect(whitespaceEvent.defaultPrevented).toBe(false);
+        expect(linkEvent.defaultPrevented).toBe(false);
         expect(textArea.value).toBe("   ");
+    });
+
+    test("inserts and selects smart-link placeholders with the primary K shortcut", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "  docs  ";
+        textArea.setSelectionRange(0, textArea.value.length);
+        await loadEnhancer();
+
+        const labelEvent = dispatchShortcut(textArea, "k");
+        expect(labelEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("  [docs](url)  ");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([9, 12]);
+
+        textArea.value = "https://example.com/path";
+        textArea.setSelectionRange(0, textArea.value.length);
+        const urlEvent = dispatchShortcut(textArea, "k");
+        expect(urlEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("[link text](https://example.com/path)");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 10]);
     });
 
     test("uses Command as the primary modifier on Apple platforms", async () => {
@@ -380,6 +401,20 @@ describe("Markdown Enhancer", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([41, 41]);
     });
 
+    test("escapes Markdown-sensitive pasted links while preserving selected whitespace", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "  [docs]\\guide  ";
+        textArea.setSelectionRange(0, textArea.value.length);
+        await loadEnhancer();
+        const expected = "  [\\[docs\\]\\\\guide](https://example.com/a_\\(b\\)%3Cc%3E)  ";
+
+        const event = dispatchPaste(textArea, "https://example.com/a_(b)<c>");
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe(expected);
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([expected.length - 2, expected.length - 2]);
+    });
+
     test("leaves non-link paste behavior to the browser", async () => {
         const textArea = createSupportedEditor();
         textArea.value = "documentation";
@@ -390,6 +425,19 @@ describe("Markdown Enhancer", () => {
 
         expect(event.defaultPrevented).toBe(false);
         expect(textArea.value).toBe("documentation");
+    });
+
+    test("leaves URL paste with no selection to the browser", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "documentation";
+        textArea.setSelectionRange(3, 3);
+        await loadEnhancer();
+
+        const event = dispatchPaste(textArea, "https://example.com/path");
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("documentation");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 3]);
     });
 
     test("routes events from editors added after startup", async () => {

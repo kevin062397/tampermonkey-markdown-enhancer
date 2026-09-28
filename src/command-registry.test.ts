@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
     createCommandRegistry,
-    FORMAT_COMMAND_IDS,
+    EDITOR_COMMAND_IDS,
     type EditorCommand,
     type EditorCommandContext
 } from "./command-registry";
@@ -25,13 +25,15 @@ describe("Command registry", () => {
         const context: EditorCommandContext = { textArea: createTextArea("value", 0, 5) };
 
         expect(registry.listCommands().map(({ id, label }) => ({ id, label }))).toEqual([
-            { id: FORMAT_COMMAND_IDS.bold, label: "Bold" },
-            { id: FORMAT_COMMAND_IDS.italic, label: "Italic" },
-            { id: FORMAT_COMMAND_IDS.strikethrough, label: "Strikethrough" },
-            { id: FORMAT_COMMAND_IDS.inlineCode, label: "Inline code" }
+            { id: EDITOR_COMMAND_IDS.bold, label: "Bold" },
+            { id: EDITOR_COMMAND_IDS.italic, label: "Italic" },
+            { id: EDITOR_COMMAND_IDS.strikethrough, label: "Strikethrough" },
+            { id: EDITOR_COMMAND_IDS.inlineCode, label: "Inline code" },
+            { id: EDITOR_COMMAND_IDS.link, label: "Link" }
         ]);
-        expect(registry.findCommandByShortcut("B", true, context)?.id).toBe(FORMAT_COMMAND_IDS.bold);
-        expect(registry.findCommandByShortcut("i", true, context)?.id).toBe(FORMAT_COMMAND_IDS.italic);
+        expect(registry.findCommandByShortcut("B", true, context)?.id).toBe(EDITOR_COMMAND_IDS.bold);
+        expect(registry.findCommandByShortcut("i", true, context)?.id).toBe(EDITOR_COMMAND_IDS.italic);
+        expect(registry.findCommandByShortcut("K", true, context)?.id).toBe(EDITOR_COMMAND_IDS.link);
         expect(registry.findCommandByShortcut("b", false, context)).toBeUndefined();
     });
 
@@ -40,17 +42,19 @@ describe("Command registry", () => {
         const textArea = createTextArea("   ", 0, 3);
         const context = { textArea };
 
-        expect(registry.getCommand(FORMAT_COMMAND_IDS.bold)?.isAvailable(context)).toBe(false);
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.bold, context)).toBe(false);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.bold)?.isAvailable(context)).toBe(false);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.link)?.isAvailable(context)).toBe(false);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.bold, context)).toBe(false);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.link, context)).toBe(false);
         expect(textArea.value).toBe("   ");
 
         textArea.value = "value";
         textArea.setSelectionRange(0, 5);
         textArea.readOnly = true;
-        expect(registry.getCommand(FORMAT_COMMAND_IDS.bold)?.isAvailable(context)).toBe(false);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.bold)?.isAvailable(context)).toBe(false);
         textArea.readOnly = false;
         textArea.disabled = true;
-        expect(registry.getCommand(FORMAT_COMMAND_IDS.bold)?.isAvailable(context)).toBe(false);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.bold)?.isAvailable(context)).toBe(false);
     });
 
     test("preserves bold while toggling italic for marker-inclusive selections", () => {
@@ -58,11 +62,11 @@ describe("Command registry", () => {
         const textArea = createTextArea("**hello**", 0, 9);
         const context = { textArea };
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.italic, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.italic, context)).toBe(true);
         expect(textArea.value).toBe("***hello***");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 8]);
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.italic, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.italic, context)).toBe(true);
         expect(textArea.value).toBe("**hello**");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 7]);
     });
@@ -72,25 +76,25 @@ describe("Command registry", () => {
         const textArea = createTextArea("***hello***", 2, 9);
         const context = { textArea };
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.italic, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.italic, context)).toBe(true);
         expect(textArea.value).toBe("**hello**");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 7]);
 
         textArea.value = "***hello***";
         textArea.setSelectionRange(1, 10);
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.bold, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.bold, context)).toBe(true);
         expect(textArea.value).toBe("*hello*");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 6]);
 
         textArea.value = "**hello**";
         textArea.setSelectionRange(1, 8);
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.italic, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.italic, context)).toBe(true);
         expect(textArea.value).toBe("***hello***");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 8]);
 
         textArea.value = "****hello****";
         textArea.setSelectionRange(2, 11);
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.bold, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.bold, context)).toBe(true);
         expect(textArea.value).toBe("**hello**");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 7]);
     });
@@ -100,11 +104,11 @@ describe("Command registry", () => {
         const textArea = createTextArea("  hello  ", 0, 9);
         const context = { textArea };
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.strikethrough, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.strikethrough, context)).toBe(true);
         expect(textArea.value).toBe("  ~~hello~~  ");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([4, 9]);
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.strikethrough, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.strikethrough, context)).toBe(true);
         expect(textArea.value).toBe("  hello  ");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 7]);
     });
@@ -114,11 +118,11 @@ describe("Command registry", () => {
         const textArea = createTextArea("  `hello`  ", 0, 11);
         const context = { textArea };
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.inlineCode, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.inlineCode, context)).toBe(true);
         expect(textArea.value).toBe("  hello  ");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 7]);
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.inlineCode, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.inlineCode, context)).toBe(true);
         expect(textArea.value).toBe("  `hello`  ");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 8]);
     });
@@ -128,27 +132,63 @@ describe("Command registry", () => {
         const textArea = createTextArea("~~  hello  ~~", 2, 11);
         const context = { textArea };
 
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.strikethrough, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.strikethrough, context)).toBe(true);
         expect(textArea.value).toBe("  hello  ");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 7]);
 
         textArea.value = "`  hello  `";
         textArea.setSelectionRange(1, 10);
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.inlineCode, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.inlineCode, context)).toBe(true);
         expect(textArea.value).toBe("  hello  ");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 7]);
 
         textArea.value = "~~hello~~";
         textArea.setSelectionRange(1, 8);
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.strikethrough, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.strikethrough, context)).toBe(true);
         expect(textArea.value).toBe("hello");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 5]);
 
         textArea.value = "``hello``";
         textArea.setSelectionRange(1, 8);
-        expect(registry.executeCommand(FORMAT_COMMAND_IDS.inlineCode, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.inlineCode, context)).toBe(true);
         expect(textArea.value).toBe("hello");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 5]);
+    });
+
+    test("inserts an editable URL placeholder for selected label text", () => {
+        const registry = createCommandRegistry();
+        const textArea = createTextArea("  docs  ", 0, 8);
+        const context = { textArea };
+
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.link, context)).toBe(true);
+        expect(textArea.value).toBe("  [docs](url)  ");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([9, 12]);
+    });
+
+    test.each([
+        "https://example.com/path",
+        "http://example.com/path",
+        "ftp://example.com/file",
+        "mailto:user@example.com"
+    ])("inserts an editable label placeholder for selected URL %s", (url) => {
+        const registry = createCommandRegistry();
+        const textArea = createTextArea(url, 0, url.length);
+        const context = { textArea };
+
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.link, context)).toBe(true);
+        expect(textArea.value).toBe(`[link text](${url})`);
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 10]);
+    });
+
+    test("escapes a selected URL destination while preserving surrounding whitespace", () => {
+        const registry = createCommandRegistry();
+        const value = "  https://example.com/a_(b)<c>  ";
+        const textArea = createTextArea(value, 0, value.length);
+        const context = { textArea };
+
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.link, context)).toBe(true);
+        expect(textArea.value).toBe(String.raw`  [link text](https://example.com/a_\(b\)%3Cc%3E)  `);
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 12]);
     });
 
     test("resolves shortcut conflicts with injected-command availability", () => {
@@ -167,7 +207,7 @@ describe("Command registry", () => {
         const textArea = createTextArea("value", 0, 5);
         const context = { textArea };
 
-        expect(registry.findCommandByShortcut("b", true, context)?.id).toBe(FORMAT_COMMAND_IDS.bold);
+        expect(registry.findCommandByShortcut("b", true, context)?.id).toBe(EDITOR_COMMAND_IDS.bold);
         textArea.dataset.commandMode = "injected";
         expect(registry.findCommandByShortcut("b", true, context)).toBe(injectedCommand);
     });

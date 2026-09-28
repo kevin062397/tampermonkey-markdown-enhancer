@@ -1,7 +1,8 @@
 import { applyEditTransaction } from "./edit-transaction";
 import { readEditorState, type EditorTransform } from "./editor-state";
 import {
-    createMarkdownLink,
+    createMarkdownLinkFromPaste,
+    createMarkdownLinkFromSelection,
     indentSelectedLines,
     insertSpaces,
     outdentSelectedLines,
@@ -33,5 +34,8 @@ export const insertSpacesCommand = (textArea: HTMLTextAreaElement, tabSize: numb
 export const outdentCommand = (textArea: HTMLTextAreaElement, tabSize: number): boolean =>
     executeTransform(textArea, (state) => outdentSelectedLines(state, tabSize));
 
+export const insertMarkdownLinkCommand = (textArea: HTMLTextAreaElement): boolean =>
+    executeTransform(textArea, createMarkdownLinkFromSelection);
+
 export const pasteMarkdownLinkCommand = (textArea: HTMLTextAreaElement, pasteText: string): boolean =>
-    executeTransform(textArea, (state) => createMarkdownLink(state, pasteText));
+    executeTransform(textArea, (state) => createMarkdownLinkFromPaste(state, pasteText));
