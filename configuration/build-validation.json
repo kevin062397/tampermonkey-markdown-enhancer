@@ -13,6 +13,8 @@
     "runtimeMarkers": [
         "initializeMarkdownEnhancer",
         "createCommandRegistry",
+        "deleteEmptyPair",
+        "isTextReplacementRequired",
         "addEventListener(\"keydown\"",
         "addEventListener(\"paste\""
     ],

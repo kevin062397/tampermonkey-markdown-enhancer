@@ -1,6 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { EditorCommand } from "./command-registry";
 
+const ASYMMETRIC_PAIR_CASES = [
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+    ["<", ">"]
+] as const;
+
+const SYMMETRIC_PAIR_CASES = [
+    ['"', '"'],
+    ["'", "'"],
+    ["`", "`"]
+] as const;
+
+const PAIR_CASES = [...ASYMMETRIC_PAIR_CASES, ...SYMMETRIC_PAIR_CASES] as const;
+
 let disposeEnhancer: (() => void) | undefined;
 
 const createSupportedEditor = (): HTMLTextAreaElement => {
@@ -153,6 +168,133 @@ describe("Markdown Enhancer", () => {
 
         expect(event.defaultPrevented).toBe(false);
         expect(textArea.value).toBe("review");
+    });
+
+    test("creates every asymmetric pair at a collapsed cursor", async () => {
+        const textArea = createSupportedEditor();
+        await loadEnhancer();
+
+        for (const [leading, trailing] of ASYMMETRIC_PAIR_CASES) {
+            textArea.value = "";
+            textArea.setSelectionRange(0, 0);
+            const event = dispatchKey(textArea, leading);
+            expect(event.defaultPrevented).toBe(true);
+            expect(textArea.value).toBe(leading + trailing);
+            expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 1]);
+        }
+    });
+
+    test("wraps selected text with every supported pair", async () => {
+        const textArea = createSupportedEditor();
+        await loadEnhancer();
+
+        for (const [leading, trailing] of PAIR_CASES) {
+            textArea.value = "value";
+            textArea.setSelectionRange(0, 5);
+            const event = dispatchKey(textArea, leading);
+            expect(event.defaultPrevented).toBe(true);
+            expect(textArea.value).toBe(`${leading}value${trailing}`);
+            expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 6]);
+        }
+    });
+
+    test("skips every existing matching closer without emitting input", async () => {
+        const textArea = createSupportedEditor();
+        const inputEvents: InputEvent[] = [];
+        textArea.addEventListener("input", (event) => inputEvents.push(event as InputEvent));
+        await loadEnhancer();
+
+        for (const [leading, trailing] of PAIR_CASES) {
+            textArea.value = `${leading}value${trailing}`;
+            textArea.setSelectionRange(6, 6);
+            const event = dispatchKey(textArea, trailing);
+            expect(event.defaultPrevented).toBe(true);
+            expect(textArea.value).toBe(`${leading}value${trailing}`);
+            expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([7, 7]);
+        }
+        expect(inputEvents).toHaveLength(0);
+    });
+
+    test("deletes every empty pair with one Backspace edit", async () => {
+        const textArea = createSupportedEditor();
+        const inputEvents: InputEvent[] = [];
+        textArea.addEventListener("input", (event) => inputEvents.push(event as InputEvent));
+        await loadEnhancer();
+
+        for (const [leading, trailing] of PAIR_CASES) {
+            textArea.value = leading + trailing;
+            textArea.setSelectionRange(1, 1);
+            const event = dispatchKey(textArea, "Backspace");
+            expect(event.defaultPrevented).toBe(true);
+            expect(textArea.value).toBe("");
+            expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 0]);
+        }
+        expect(inputEvents).toHaveLength(PAIR_CASES.length);
+    });
+
+    test("deletes nested empty pairs from the inside out", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "([])";
+        textArea.setSelectionRange(2, 2);
+        await loadEnhancer();
+
+        dispatchKey(textArea, "Backspace");
+        expect(textArea.value).toBe("()");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 1]);
+
+        dispatchKey(textArea, "Backspace");
+        expect(textArea.value).toBe("");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 0]);
+    });
+
+    test("skips only the matching closer in a duplicated sequence", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "())";
+        textArea.setSelectionRange(1, 1);
+        await loadEnhancer();
+
+        const matchingEvent = dispatchKey(textArea, ")");
+        const unmatchedEvent = dispatchKey(textArea, ")");
+
+        expect(matchingEvent.defaultPrevented).toBe(true);
+        expect(unmatchedEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("())");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 2]);
+    });
+
+    test("leaves unmatched closers and selected Backspace to the browser", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "value)";
+        textArea.setSelectionRange(5, 5);
+        await loadEnhancer();
+
+        const closerEvent = dispatchKey(textArea, ")");
+        expect(closerEvent.defaultPrevented).toBe(false);
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([5, 5]);
+
+        textArea.value = "([x)]";
+        textArea.setSelectionRange(3, 3);
+        const crossedCloserEvent = dispatchKey(textArea, ")");
+        expect(crossedCloserEvent.defaultPrevented).toBe(false);
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 3]);
+
+        textArea.value = "()";
+        textArea.setSelectionRange(0, 2);
+        const backspaceEvent = dispatchKey(textArea, "Backspace");
+        expect(backspaceEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("()");
+
+        textArea.value = "\\''";
+        textArea.setSelectionRange(2, 2);
+        const escapedBackspaceEvent = dispatchKey(textArea, "Backspace");
+        expect(escapedBackspaceEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("\\''");
+
+        textArea.value = "()";
+        textArea.setSelectionRange(1, 1);
+        const modifiedBackspaceEvent = dispatchKey(textArea, "Backspace", { ctrlKey: true });
+        expect(modifiedBackspaceEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("()");
     });
 
     test("preserves bold and italic toggle transitions", async () => {

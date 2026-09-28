@@ -1,4 +1,10 @@
 import type { EditOperation, EditorSelectionDirection, EditorState } from "./editor-state";
+import {
+    isCharacterEscaped,
+    isClosingPairCharacter,
+    isClosingPairMatched,
+    isEmptyCharacterPair
+} from "./paired-characters";
 
 const createEdit = (
     state: EditorState,
@@ -9,6 +15,7 @@ const createEdit = (
     selectionEnd: number,
     selectionDirection: EditorSelectionDirection = state.selectionDirection
 ): EditOperation => ({
+    isTextReplacementRequired: true,
     replaceStart,
     replaceEnd,
     text,
@@ -171,6 +178,42 @@ const handleGenericToggle = (state: EditorState, wrap: string): EditOperation | 
         getTextParts(contentState.value.slice(contentState.selectionStart, contentState.selectionEnd)),
         wrap
     );
+};
+
+const createSelectionMove = (state: EditorState, cursor: number): EditOperation => ({
+    isTextReplacementRequired: false,
+    replaceStart: state.selectionStart,
+    replaceEnd: state.selectionEnd,
+    text: "",
+    selectionStart: cursor,
+    selectionEnd: cursor,
+    selectionDirection: "none"
+});
+
+export const skipClosingPair = (state: EditorState, character: string): EditOperation | null => {
+    if (
+        state.selectionStart !== state.selectionEnd ||
+        !isClosingPairCharacter(character) ||
+        state.value[state.selectionStart] !== character ||
+        !isClosingPairMatched(state.value, state.selectionStart, character)
+    ) {
+        return null;
+    }
+    return createSelectionMove(state, state.selectionStart + character.length);
+};
+
+export const deleteEmptyPair = (state: EditorState): EditOperation | null => {
+    if (state.selectionStart !== state.selectionEnd || state.selectionStart === 0) {
+        return null;
+    }
+    const cursor = state.selectionStart;
+    if (
+        isCharacterEscaped(state.value, cursor - 1) ||
+        !isEmptyCharacterPair(state.value[cursor - 1], state.value[cursor])
+    ) {
+        return null;
+    }
+    return createEdit(state, cursor - 1, cursor + 1, "", cursor - 1, cursor - 1, "none");
 };
 
 export const wrapSelection = (state: EditorState, leading: string, trailing: string): EditOperation => {

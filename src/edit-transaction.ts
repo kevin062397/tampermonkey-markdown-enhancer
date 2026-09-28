@@ -5,20 +5,21 @@ export const applyEditTransaction = (textArea: HTMLTextAreaElement, operation: E
     const scrollLeft = textArea.scrollLeft;
 
     textArea.focus();
-    textArea.setSelectionRange(operation.replaceStart, operation.replaceEnd);
-
-    const isNativeTransactionUsed =
-        typeof document.execCommand === "function" && document.execCommand("insertText", false, operation.text);
-    if (!isNativeTransactionUsed) {
-        textArea.setRangeText(operation.text, operation.replaceStart, operation.replaceEnd, "select");
-        textArea.dispatchEvent(
-            new InputEvent("input", {
-                bubbles: true,
-                composed: true,
-                data: operation.text,
-                inputType: "insertText"
-            })
-        );
+    if (operation.isTextReplacementRequired) {
+        textArea.setSelectionRange(operation.replaceStart, operation.replaceEnd);
+        const isNativeTransactionUsed =
+            typeof document.execCommand === "function" && document.execCommand("insertText", false, operation.text);
+        if (!isNativeTransactionUsed) {
+            textArea.setRangeText(operation.text, operation.replaceStart, operation.replaceEnd, "select");
+            textArea.dispatchEvent(
+                new InputEvent("input", {
+                    bubbles: true,
+                    composed: true,
+                    data: operation.text,
+                    inputType: "insertText"
+                })
+            );
+        }
     }
 
     textArea.setSelectionRange(operation.selectionStart, operation.selectionEnd, operation.selectionDirection);

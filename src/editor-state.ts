@@ -8,6 +8,7 @@ export interface EditorState {
 }
 
 export interface EditOperation {
+    readonly isTextReplacementRequired: boolean;
     readonly replaceStart: number;
     readonly replaceEnd: number;
     readonly text: string;

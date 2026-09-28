@@ -1,31 +1,26 @@
 import type { EditorCommandRegistry } from "./command-registry";
 import {
+    deleteEmptyPairCommand,
     indentCommand,
     insertSpacesCommand,
     outdentCommand,
     pasteMarkdownLinkCommand,
+    skipClosingPairCommand,
     wrapSelectionCommand
 } from "./commands";
-
-interface WrapCharacters {
-    readonly leading: string;
-    readonly trailing: string;
-    readonly isSelectionRequired: boolean;
-}
+import { isClosingPairCharacter, PAIRED_CHARACTERS, type PairedCharacterDefinition } from "./paired-characters";
 
 export type EditorTargetPredicate = (target: EventTarget | null) => target is HTMLTextAreaElement;
 
-const WRAP_CHARACTERS: Record<string, WrapCharacters> = {
-    "(": { leading: "(", trailing: ")", isSelectionRequired: false },
-    "[": { leading: "[", trailing: "]", isSelectionRequired: false },
-    "{": { leading: "{", trailing: "}", isSelectionRequired: false },
-    "<": { leading: "<", trailing: ">", isSelectionRequired: false },
-    '"': { leading: '"', trailing: '"', isSelectionRequired: true },
-    "'": { leading: "'", trailing: "'", isSelectionRequired: true },
-    "`": { leading: "`", trailing: "`", isSelectionRequired: true },
+const SELECTION_WRAP_CHARACTERS: Readonly<Record<string, PairedCharacterDefinition>> = {
     _: { leading: "_", trailing: "_", isSelectionRequired: true },
     "*": { leading: "*", trailing: "*", isSelectionRequired: true },
     "~": { leading: "~", trailing: "~", isSelectionRequired: true }
+};
+
+const WRAP_CHARACTERS: Readonly<Record<string, PairedCharacterDefinition>> = {
+    ...PAIRED_CHARACTERS,
+    ...SELECTION_WRAP_CHARACTERS
 };
 
 const TAB_SIZE = 4;
@@ -54,6 +49,21 @@ const handleEditorKeydown = (
     if (
         isShortcutModifierAllowed &&
         commandRegistry.executeCommandByShortcut(event.key, isPrimaryModifierActive, context)
+    ) {
+        event.preventDefault();
+        return;
+    }
+
+    if (event.key === "Backspace" && !event.shiftKey && isEditingModifierAllowed && deleteEmptyPairCommand(textArea)) {
+        event.preventDefault();
+        return;
+    }
+
+    if (
+        !isSelectionPresent &&
+        isEditingModifierAllowed &&
+        isClosingPairCharacter(event.key) &&
+        skipClosingPairCommand(textArea, event.key)
     ) {
         event.preventDefault();
         return;

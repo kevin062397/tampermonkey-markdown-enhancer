@@ -3,9 +3,11 @@ import { readEditorState, type EditorTransform } from "./editor-state";
 import {
     createMarkdownLinkFromPaste,
     createMarkdownLinkFromSelection,
+    deleteEmptyPair,
     indentSelectedLines,
     insertSpaces,
     outdentSelectedLines,
+    skipClosingPair,
     toggleWrap,
     wrapSelection
 } from "./transformations";
@@ -18,6 +20,12 @@ const executeTransform = (textArea: HTMLTextAreaElement, transform: EditorTransf
     applyEditTransaction(textArea, operation);
     return true;
 };
+
+export const skipClosingPairCommand = (textArea: HTMLTextAreaElement, character: string): boolean =>
+    executeTransform(textArea, (state) => skipClosingPair(state, character));
+
+export const deleteEmptyPairCommand = (textArea: HTMLTextAreaElement): boolean =>
+    executeTransform(textArea, deleteEmptyPair);
 
 export const wrapSelectionCommand = (textArea: HTMLTextAreaElement, leading: string, trailing: string): boolean =>
     executeTransform(textArea, (state) => wrapSelection(state, leading, trailing));
