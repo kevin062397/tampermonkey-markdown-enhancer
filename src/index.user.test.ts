@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { EditorCommand } from "./command-registry";
 
 let disposeEnhancer: (() => void) | undefined;
 
@@ -11,6 +12,11 @@ const createSupportedEditor = (): HTMLTextAreaElement => {
 const loadEnhancer = async (): Promise<void> => {
     const module = await import("./index.user");
     disposeEnhancer = module.disposeMarkdownEnhancer;
+};
+
+const loadEnhancerWithCommands = async (additionalCommands: readonly EditorCommand[]): Promise<void> => {
+    const module = await import("./runtime");
+    disposeEnhancer = module.initializeMarkdownEnhancer(additionalCommands);
 };
 
 const dispatchKey = (textArea: HTMLTextAreaElement, key: string, init: KeyboardEventInit = {}): KeyboardEvent => {
@@ -72,6 +78,23 @@ describe("Markdown Enhancer", () => {
 
         expect(first.value).toBe("(first)");
         expect(second.value).toBe("[second]");
+    });
+
+    test("leaves read-only editors unchanged", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        textArea.readOnly = true;
+        await loadEnhancer();
+
+        const shortcutEvent = dispatchShortcut(textArea, "b");
+        const wrappingEvent = dispatchKey(textArea, "(");
+        const tabEvent = dispatchKey(textArea, "Tab");
+
+        expect(shortcutEvent.defaultPrevented).toBe(false);
+        expect(wrappingEvent.defaultPrevented).toBe(false);
+        expect(tabEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("review");
     });
 
     test("wraps selected text and preserves editor state", async () => {
@@ -151,6 +174,44 @@ describe("Markdown Enhancer", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 7]);
     });
 
+    test("falls back to a core shortcut when an injected command declines execution", async () => {
+        const executeInjectedCommand = vi.fn(() => false);
+        const injectedCommand: EditorCommand = {
+            id: "custom.bold",
+            label: "Contextual bold",
+            shortcut: { key: "b", isPrimaryModifierRequired: true },
+            isAvailable: () => true,
+            execute: executeInjectedCommand
+        };
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        await loadEnhancerWithCommands([injectedCommand]);
+
+        const event = dispatchShortcut(textArea, "b");
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(executeInjectedCommand).toHaveBeenCalledOnce();
+        expect(textArea.value).toBe("**review**");
+    });
+
+    test("leaves unavailable formatting shortcuts to the page", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, 0);
+        await loadEnhancer();
+
+        const emptySelectionEvent = dispatchShortcut(textArea, "b");
+        expect(emptySelectionEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("review");
+
+        textArea.value = "   ";
+        textArea.setSelectionRange(0, 3);
+        const whitespaceEvent = dispatchShortcut(textArea, "i");
+        expect(whitespaceEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("   ");
+    });
+
     test("uses Command as the primary modifier on Apple platforms", async () => {
         setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
         const textArea = createSupportedEditor();
@@ -182,6 +243,70 @@ describe("Markdown Enhancer", () => {
         const event = dispatchKey(textArea, "b", modifiers);
 
         expect(event.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("review");
+    });
+
+    test("routes injected non-primary shortcuts only without modifiers", async () => {
+        const executeInjectedCommand = vi.fn(() => true);
+        const injectedCommand: EditorCommand = {
+            id: "custom.unmodified",
+            label: "Unmodified",
+            shortcut: { key: "b", isPrimaryModifierRequired: false },
+            isAvailable: () => true,
+            execute: executeInjectedCommand
+        };
+        const textArea = createSupportedEditor();
+        await loadEnhancerWithCommands([injectedCommand]);
+
+        for (const modifiers of [
+            { ctrlKey: true, shiftKey: true },
+            { altKey: true },
+            { ctrlKey: true, metaKey: true },
+            { ctrlKey: true },
+            { metaKey: true }
+        ]) {
+            const event = dispatchKey(textArea, "b", modifiers);
+            expect(event.defaultPrevented).toBe(false);
+        }
+        expect(executeInjectedCommand).not.toHaveBeenCalled();
+
+        const event = dispatchKey(textArea, "b");
+        expect(event.defaultPrevented).toBe(true);
+        expect(executeInjectedCommand).toHaveBeenCalledOnce();
+    });
+
+    test("leaves Control-modified non-primary shortcuts to the page on Apple platforms", async () => {
+        setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
+        const executeInjectedCommand = vi.fn(() => true);
+        const injectedCommand: EditorCommand = {
+            id: "custom.unmodified",
+            label: "Unmodified",
+            shortcut: { key: "b", isPrimaryModifierRequired: false },
+            isAvailable: () => true,
+            execute: executeInjectedCommand
+        };
+        const textArea = createSupportedEditor();
+        await loadEnhancerWithCommands([injectedCommand]);
+
+        const event = dispatchKey(textArea, "b", { ctrlKey: true });
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(executeInjectedCommand).not.toHaveBeenCalled();
+    });
+
+    test("leaves modified wrapping and Tab keys to the page", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        await loadEnhancer();
+
+        for (const event of [
+            dispatchKey(textArea, "[", { ctrlKey: true }),
+            dispatchKey(textArea, "Tab", { metaKey: true }),
+            dispatchKey(textArea, "Tab", { altKey: true })
+        ]) {
+            expect(event.defaultPrevented).toBe(false);
+        }
         expect(textArea.value).toBe("review");
     });
 

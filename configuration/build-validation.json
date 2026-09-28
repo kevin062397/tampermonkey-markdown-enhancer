@@ -4,12 +4,17 @@
         "author": ["Haoyuan Kevin Xia"],
         "description": ["Enhance Markdown editing experience."],
         "grant": ["none"],
-        "match": ["*"],
+        "match": ["*://*/*"],
         "name": ["Markdown Enhancer"],
         "namespace": ["https://github.com/kevin062397/TampermonkeyMarkdownEnhancer"],
         "version": ["1.5.0"]
     },
     "requiredMetadata": ["icon", "icon64"],
-    "runtimeMarkers": ["initializeMarkdownEnhancer", "addEventListener(\"keydown\"", "addEventListener(\"paste\""],
+    "runtimeMarkers": [
+        "initializeMarkdownEnhancer",
+        "createCommandRegistry",
+        "addEventListener(\"keydown\"",
+        "addEventListener(\"paste\""
+    ],
     "sourceEntry": "src/index.user.ts"
 }

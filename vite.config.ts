@@ -1,7 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import monkey from "vite-plugin-monkey";
-
 import userscript from "./configuration/userscript.ts";
 
 export default defineConfig({

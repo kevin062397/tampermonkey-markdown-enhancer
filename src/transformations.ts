@@ -17,81 +17,160 @@ const createEdit = (
     selectionDirection
 });
 
-const isWrappedWith = (value: string, start: number, end: number, pattern: string): boolean => {
-    const before = value.slice(start - pattern.length, start);
-    const after = value.slice(end, end + pattern.length);
-    return before === pattern && after === pattern;
+interface TextParts {
+    readonly leadingWhitespace: string;
+    readonly content: string;
+    readonly trailingWhitespace: string;
+}
+
+const getTextParts = (text: string): TextParts => {
+    const leadingWhitespace = text.match(/^\s*/)?.[0] ?? "";
+    const trailingWhitespace = text.match(/\s*$/)?.[0] ?? "";
+    const contentStart = leadingWhitespace.length;
+    const contentEnd = Math.max(contentStart, text.length - trailingWhitespace.length);
+    return {
+        leadingWhitespace,
+        content: text.slice(contentStart, contentEnd),
+        trailingWhitespace: text.slice(contentEnd)
+    };
+};
+
+const getNonWhitespaceSelection = (state: EditorState): EditorState | null => {
+    const selectedText = state.value.slice(state.selectionStart, state.selectionEnd);
+    const parts = getTextParts(selectedText);
+    if (!parts.content) {
+        return null;
+    }
+    return {
+        ...state,
+        selectionStart: state.selectionStart + parts.leadingWhitespace.length,
+        selectionEnd: state.selectionEnd - parts.trailingWhitespace.length
+    };
+};
+
+const createFormattingEdit = (
+    state: EditorState,
+    replaceStart: number,
+    replaceEnd: number,
+    parts: TextParts,
+    marker: string
+): EditOperation => {
+    const text = parts.leadingWhitespace + marker + parts.content + marker + parts.trailingWhitespace;
+    const selectionStart = replaceStart + parts.leadingWhitespace.length + marker.length;
+    return createEdit(state, replaceStart, replaceEnd, text, selectionStart, selectionStart + parts.content.length);
+};
+
+const countMatchingCharactersBefore = (value: string, index: number, character: string): number => {
+    let count = 0;
+    while (index - count - 1 >= 0 && value[index - count - 1] === character) {
+        count += 1;
+    }
+    return count;
+};
+
+const countMatchingCharactersAfter = (value: string, index: number, character: string): number => {
+    let count = 0;
+    while (index + count < value.length && value[index + count] === character) {
+        count += 1;
+    }
+    return count;
+};
+
+const countExternalMarkerDepth = (state: EditorState, character: string): number =>
+    Math.min(
+        countMatchingCharactersBefore(state.value, state.selectionStart, character),
+        countMatchingCharactersAfter(state.value, state.selectionEnd, character)
+    );
+
+const countIncludedMarkerDepth = (text: string, character: string): number => {
+    let leadingCount = 0;
+    while (leadingCount < text.length && text[leadingCount] === character) {
+        leadingCount += 1;
+    }
+    let trailingCount = 0;
+    while (trailingCount < text.length && text[text.length - trailingCount - 1] === character) {
+        trailingCount += 1;
+    }
+    return Math.min(leadingCount, trailingCount);
+};
+
+const getCombinedTextParts = (outerParts: TextParts, includedMarkerDepth: number): TextParts => {
+    const innerText = includedMarkerDepth
+        ? outerParts.content.slice(includedMarkerDepth, -includedMarkerDepth)
+        : outerParts.content;
+    const innerParts = getTextParts(innerText);
+    return {
+        leadingWhitespace: outerParts.leadingWhitespace + innerParts.leadingWhitespace,
+        content: innerParts.content,
+        trailingWhitespace: innerParts.trailingWhitespace + outerParts.trailingWhitespace
+    };
+};
+
+const getToggledAsteriskDepth = (currentDepth: number, targetDepth: 1 | 2): number => {
+    if (targetDepth === 1) {
+        return currentDepth % 2 === 1 ? currentDepth - 1 : currentDepth + 1;
+    }
+    return currentDepth >= 2 ? currentDepth - 2 : currentDepth + 2;
 };
 
 const handleMarkdownToggle = (state: EditorState, wrap: "*" | "**"): EditOperation | null => {
-    const { selectionStart: start, selectionEnd: end, value } = state;
-    const selectedText = value.slice(start, end);
-
-    if (isWrappedWith(value, start, end, "***")) {
-        const newWrap = wrap === "*" ? "**" : "*";
-        const newStart = start + (wrap === "*" ? -1 : -2);
-        return createEdit(
+    const outerParts = getTextParts(state.value.slice(state.selectionStart, state.selectionEnd));
+    const externalMarkerDepth = countExternalMarkerDepth(state, "*");
+    const includedMarkerDepth = countIncludedMarkerDepth(outerParts.content, "*");
+    const currentDepth = externalMarkerDepth + includedMarkerDepth;
+    if (currentDepth > 0) {
+        const marker = "*".repeat(getToggledAsteriskDepth(currentDepth, wrap.length as 1 | 2));
+        return createFormattingEdit(
             state,
-            start - 3,
-            end + 3,
-            newWrap + selectedText + newWrap,
-            newStart,
-            newStart + selectedText.length
+            state.selectionStart - externalMarkerDepth,
+            state.selectionEnd + externalMarkerDepth,
+            getCombinedTextParts(outerParts, includedMarkerDepth),
+            marker
         );
     }
 
-    if (isWrappedWith(value, start, end, wrap)) {
-        if (wrap === "*" && (value.slice(start - 2, start) === "**" || value.slice(end, end + 2) === "**")) {
-            return null;
-        }
-        const newStart = start - wrap.length;
-        return createEdit(
-            state,
-            start - wrap.length,
-            end + wrap.length,
-            selectedText,
-            newStart,
-            newStart + selectedText.length
-        );
+    const contentState = getNonWhitespaceSelection(state);
+    if (!contentState) {
+        return null;
     }
-
-    const otherWrap = wrap === "*" ? "**" : "*";
-    if (isWrappedWith(value, start, end, otherWrap)) {
-        const replacementStart = start - otherWrap.length;
-        const newStart = replacementStart + 3;
-        return createEdit(
-            state,
-            replacementStart,
-            end + otherWrap.length,
-            `***${selectedText}***`,
-            newStart,
-            newStart + selectedText.length
-        );
-    }
-
-    if (selectedText.startsWith(wrap) && selectedText.endsWith(wrap) && selectedText.length >= wrap.length * 2) {
-        const unwrapped = selectedText.slice(wrap.length, -wrap.length);
-        return createEdit(state, start, end, unwrapped, start, start + unwrapped.length);
-    }
-
-    return null;
+    return createFormattingEdit(
+        contentState,
+        contentState.selectionStart,
+        contentState.selectionEnd,
+        getTextParts(contentState.value.slice(contentState.selectionStart, contentState.selectionEnd)),
+        wrap
+    );
 };
 
 const handleGenericToggle = (state: EditorState, wrap: string): EditOperation | null => {
-    const { selectionStart: start, selectionEnd: end, value } = state;
-    const selectedText = value.slice(start, end);
-
-    if (isWrappedWith(value, start, end, wrap)) {
-        const newStart = start - wrap.length;
-        return createEdit(state, newStart, end + wrap.length, selectedText, newStart, newStart + selectedText.length);
+    const character = wrap[0];
+    const isRepeatedCharacterMarker = Boolean(character) && [...wrap].every((value) => value === character);
+    const outerParts = getTextParts(state.value.slice(state.selectionStart, state.selectionEnd));
+    if (isRepeatedCharacterMarker) {
+        const externalMarkerDepth = countExternalMarkerDepth(state, character);
+        const includedMarkerDepth = countIncludedMarkerDepth(outerParts.content, character);
+        if (externalMarkerDepth + includedMarkerDepth >= wrap.length) {
+            return createFormattingEdit(
+                state,
+                state.selectionStart - externalMarkerDepth,
+                state.selectionEnd + externalMarkerDepth,
+                getCombinedTextParts(outerParts, includedMarkerDepth),
+                ""
+            );
+        }
     }
 
-    if (selectedText.startsWith(wrap) && selectedText.endsWith(wrap) && selectedText.length >= wrap.length * 2) {
-        const unwrapped = selectedText.slice(wrap.length, -wrap.length);
-        return createEdit(state, start, end, unwrapped, start, start + unwrapped.length);
+    const contentState = getNonWhitespaceSelection(state);
+    if (!contentState) {
+        return null;
     }
-
-    return null;
+    return createFormattingEdit(
+        contentState,
+        contentState.selectionStart,
+        contentState.selectionEnd,
+        getTextParts(contentState.value.slice(contentState.selectionStart, contentState.selectionEnd)),
+        wrap
+    );
 };
 
 export const wrapSelection = (state: EditorState, leading: string, trailing: string): EditOperation => {
@@ -107,24 +186,8 @@ export const wrapSelection = (state: EditorState, leading: string, trailing: str
     );
 };
 
-export const toggleWrap = (state: EditorState, wrap: string): EditOperation => {
-    const specialEdit =
-        wrap === "*" || wrap === "**" ? handleMarkdownToggle(state, wrap) : handleGenericToggle(state, wrap);
-    if (specialEdit) {
-        return specialEdit;
-    }
-
-    const selectedText = state.value.slice(state.selectionStart, state.selectionEnd);
-    const selectionStart = state.selectionStart + wrap.length;
-    return createEdit(
-        state,
-        state.selectionStart,
-        state.selectionEnd,
-        wrap + selectedText + wrap,
-        selectionStart,
-        selectionStart + selectedText.length
-    );
-};
+export const toggleWrap = (state: EditorState, wrap: string): EditOperation | null =>
+    wrap === "*" || wrap === "**" ? handleMarkdownToggle(state, wrap) : handleGenericToggle(state, wrap);
 
 interface SelectedLineRange {
     readonly replaceStart: number;

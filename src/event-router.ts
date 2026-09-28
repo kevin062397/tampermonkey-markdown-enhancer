@@ -1,9 +1,9 @@
+import type { EditorCommandRegistry } from "./command-registry";
 import {
     indentCommand,
     insertSpacesCommand,
     outdentCommand,
     pasteMarkdownLinkCommand,
-    toggleWrapCommand,
     wrapSelectionCommand
 } from "./commands";
 
@@ -39,32 +39,33 @@ const isPrimaryModifierPressed = (event: KeyboardEvent): boolean => {
     return isApplePlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 };
 
-const handleEditorKeydown = (event: KeyboardEvent, textArea: HTMLTextAreaElement): void => {
+const handleEditorKeydown = (
+    event: KeyboardEvent,
+    textArea: HTMLTextAreaElement,
+    commandRegistry: EditorCommandRegistry
+): void => {
     const isSelectionPresent = textArea.selectionStart !== textArea.selectionEnd;
-
-    if (isPrimaryModifierPressed(event) && event.key.toLowerCase() === "b") {
+    const isPrimaryModifierActive = isPrimaryModifierPressed(event);
+    const isModifierKeyAbsent = !event.ctrlKey && !event.metaKey;
+    const isShortcutModifierAllowed =
+        !event.altKey && !event.shiftKey && (isPrimaryModifierActive || isModifierKeyAbsent);
+    const isEditingModifierAllowed = !event.altKey && !event.ctrlKey && !event.metaKey;
+    const context = { textArea };
+    if (
+        isShortcutModifierAllowed &&
+        commandRegistry.executeCommandByShortcut(event.key, isPrimaryModifierActive, context)
+    ) {
         event.preventDefault();
-        if (isSelectionPresent) {
-            toggleWrapCommand(textArea, "**");
-        }
-        return;
-    }
-
-    if (isPrimaryModifierPressed(event) && event.key.toLowerCase() === "i") {
-        event.preventDefault();
-        if (isSelectionPresent) {
-            toggleWrapCommand(textArea, "*");
-        }
         return;
     }
 
     const wrapCharacters = WRAP_CHARACTERS[event.key];
-    if (wrapCharacters && (isSelectionPresent || !wrapCharacters.isSelectionRequired)) {
+    if (wrapCharacters && isEditingModifierAllowed && (isSelectionPresent || !wrapCharacters.isSelectionRequired)) {
         event.preventDefault();
         wrapSelectionCommand(textArea, wrapCharacters.leading, wrapCharacters.trailing);
     }
 
-    if (event.key === "Tab" && !event.shiftKey) {
+    if (event.key === "Tab" && !event.shiftKey && isEditingModifierAllowed) {
         event.preventDefault();
         if (isSelectionPresent) {
             indentCommand(textArea, TAB_SIZE);
@@ -73,7 +74,7 @@ const handleEditorKeydown = (event: KeyboardEvent, textArea: HTMLTextAreaElement
         }
     }
 
-    if (event.key === "Tab" && event.shiftKey) {
+    if (event.key === "Tab" && event.shiftKey && isEditingModifierAllowed) {
         event.preventDefault();
         outdentCommand(textArea, TAB_SIZE);
     }
@@ -89,10 +90,13 @@ const handleEditorPaste = (event: ClipboardEvent, textArea: HTMLTextAreaElement)
     }
 };
 
-export const attachEditorEventRouter = (isSupportedEditor: EditorTargetPredicate): (() => void) => {
+export const attachEditorEventRouter = (
+    isSupportedEditor: EditorTargetPredicate,
+    commandRegistry: EditorCommandRegistry
+): (() => void) => {
     const handleKeydown = (event: KeyboardEvent): void => {
         if (isSupportedEditor(event.target)) {
-            handleEditorKeydown(event, event.target);
+            handleEditorKeydown(event, event.target, commandRegistry);
         }
     };
     const handlePaste = (event: ClipboardEvent): void => {

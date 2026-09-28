@@ -11,7 +11,7 @@ const userscript: MonkeyUserScript = {
     description: "Enhance Markdown editing experience.",
     namespace: "https://github.com/kevin062397/TampermonkeyMarkdownEnhancer",
     version: "1.5.0",
-    match: "*",
+    match: "*://*/*",
     grant: "none",
     icon,
     icon64
