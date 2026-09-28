@@ -25,8 +25,12 @@ const dispatchKey = (textArea: HTMLTextAreaElement, key: string, init: KeyboardE
 };
 
 const dispatchShortcut = (textArea: HTMLTextAreaElement, key: string): KeyboardEvent => {
-    const isMac = navigator.platform.toLowerCase().includes("mac");
-    return dispatchKey(textArea, key, isMac ? { metaKey: true } : { ctrlKey: true });
+    const isApplePlatform = /Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    return dispatchKey(textArea, key, isApplePlatform ? { metaKey: true } : { ctrlKey: true });
+};
+
+const setUserAgent = (userAgent: string): void => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent);
 };
 
 const dispatchPaste = (textArea: HTMLTextAreaElement, text: string): Event => {
@@ -147,6 +151,40 @@ describe("Markdown Enhancer", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 7]);
     });
 
+    test("uses Command as the primary modifier on Apple platforms", async () => {
+        setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        await loadEnhancer();
+
+        const commandEvent = dispatchKey(textArea, "b", { metaKey: true });
+        expect(commandEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("**review**");
+
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        const controlEvent = dispatchKey(textArea, "b", { ctrlKey: true });
+        expect(controlEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("review");
+    });
+
+    test.each([
+        ["Shift", { ctrlKey: true, shiftKey: true }],
+        ["Alt", { altKey: true, ctrlKey: true }],
+        ["Control and Meta", { ctrlKey: true, metaKey: true }]
+    ])("leaves %s modifier combinations to the page", async (_name, modifiers: KeyboardEventInit) => {
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        await loadEnhancer();
+
+        const event = dispatchKey(textArea, "b", modifiers);
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("review");
+    });
+
     test("inserts spaces up to the next four-column tab stop", async () => {
         const textArea = createSupportedEditor();
         textArea.value = "ab";
@@ -172,6 +210,36 @@ describe("Markdown Enhancer", () => {
         dispatchKey(textArea, "Tab", { shiftKey: true });
         expect(textArea.value).toBe("one\ntwo");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 7]);
+    });
+
+    test("maps a backward partial-indentation selection through outdent", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "  one\n    two\nthree";
+        textArea.setSelectionRange(1, 14, "backward");
+        await loadEnhancer();
+
+        dispatchKey(textArea, "Tab", { shiftKey: true });
+
+        expect(textArea.value).toBe("one\ntwo\nthree");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 8]);
+        expect(textArea.selectionDirection).toBe("backward");
+    });
+
+    test("outdents collapsed and whitespace-only selections safely", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "    item";
+        textArea.setSelectionRange(2, 2);
+        await loadEnhancer();
+
+        dispatchKey(textArea, "Tab", { shiftKey: true });
+        expect(textArea.value).toBe("item");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 0]);
+
+        textArea.value = "  \nitem";
+        textArea.setSelectionRange(0, 2);
+        dispatchKey(textArea, "Tab", { shiftKey: true });
+        expect(textArea.value).toBe("\nitem");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 0]);
     });
 
     test("converts a pasted hyperlink into a Markdown link for selected text", async () => {
@@ -221,14 +289,16 @@ describe("Markdown Enhancer", () => {
         expect(addEventListener.mock.calls.filter(([type]) => type === "paste")).toHaveLength(1);
     });
 
-    test.fails("does not indent a line touched only by a selection ending at its start", async () => {
+    test("does not indent a line touched only by a selection ending at its start", async () => {
         const textArea = createSupportedEditor();
         textArea.value = "first\nsecond";
-        textArea.setSelectionRange(0, 6);
+        textArea.setSelectionRange(0, 6, "backward");
         await loadEnhancer();
 
         dispatchKey(textArea, "Tab");
 
         expect(textArea.value).toBe("    first\nsecond");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([4, 10]);
+        expect(textArea.selectionDirection).toBe("backward");
     });
 });

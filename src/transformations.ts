@@ -126,15 +126,68 @@ export const toggleWrap = (state: EditorState, wrap: string): EditOperation => {
     );
 };
 
+interface SelectedLineRange {
+    readonly replaceStart: number;
+    readonly replaceEnd: number;
+    readonly lines: readonly string[];
+    readonly lineStarts: readonly number[];
+}
+
+const getSelectedLineRange = (state: EditorState): SelectedLineRange => {
+    const replaceStart = state.value.slice(0, state.selectionStart).lastIndexOf("\n") + 1;
+    const isSelectionEndingAtLineStart =
+        state.selectionEnd > state.selectionStart && state.value[state.selectionEnd - 1] === "\n";
+    const lineLookupEnd = isSelectionEndingAtLineStart ? state.selectionEnd - 1 : state.selectionEnd;
+    const nextLineBreak = state.value.indexOf("\n", lineLookupEnd);
+    const replaceEnd = nextLineBreak >= 0 ? nextLineBreak : state.value.length;
+    const lines = state.value.slice(replaceStart, replaceEnd).split("\n");
+    const lineStarts: number[] = [];
+    let lineStart = replaceStart;
+    for (const line of lines) {
+        lineStarts.push(lineStart);
+        lineStart += line.length + 1;
+    }
+    return { replaceStart, replaceEnd, lines, lineStarts };
+};
+
+const mapPositionAfterIndent = (position: number, lineStarts: readonly number[], tabSize: number): number => {
+    const addedLineCount = lineStarts.filter((lineStart) => lineStart <= position).length;
+    return position + addedLineCount * tabSize;
+};
+
+const countLeadingSpaces = (line: string, tabSize: number): number =>
+    Math.min(line.match(/^ */)?.[0].length ?? 0, tabSize);
+
+const mapPositionAfterOutdent = (
+    position: number,
+    lineStarts: readonly number[],
+    removedSpacesByLine: readonly number[]
+): number => {
+    let removedSpacesBeforePosition = 0;
+    for (const [index, lineStart] of lineStarts.entries()) {
+        const removedSpaces = removedSpacesByLine[index];
+        if (position < lineStart) {
+            break;
+        }
+        if (position <= lineStart + removedSpaces) {
+            return lineStart - removedSpacesBeforePosition;
+        }
+        removedSpacesBeforePosition += removedSpaces;
+    }
+    return position - removedSpacesBeforePosition;
+};
+
 export const indentSelectedLines = (state: EditorState, tabSize: number): EditOperation => {
-    const { selectionStart: start, selectionEnd: end, value } = state;
-    const selectionStartLine = value.slice(0, start).lastIndexOf("\n") + 1;
-    const nextLineBreak = value.indexOf("\n", end);
-    const selectionEndLine = nextLineBreak >= 0 ? nextLineBreak : value.length;
-    const selectedLines = value.slice(selectionStartLine, selectionEndLine).split("\n");
-    const text = selectedLines.map((line) => " ".repeat(tabSize) + line).join("\n");
-    const addedCharacters = tabSize * selectedLines.length;
-    return createEdit(state, selectionStartLine, selectionEndLine, text, start + tabSize, end + addedCharacters);
+    const range = getSelectedLineRange(state);
+    const text = range.lines.map((line) => " ".repeat(tabSize) + line).join("\n");
+    return createEdit(
+        state,
+        range.replaceStart,
+        range.replaceEnd,
+        text,
+        mapPositionAfterIndent(state.selectionStart, range.lineStarts, tabSize),
+        mapPositionAfterIndent(state.selectionEnd, range.lineStarts, tabSize)
+    );
 };
 
 export const insertSpaces = (state: EditorState, tabSize: number): EditOperation => {
@@ -153,33 +206,16 @@ export const insertSpaces = (state: EditorState, tabSize: number): EditOperation
 };
 
 export const outdentSelectedLines = (state: EditorState, tabSize: number): EditOperation => {
-    const { selectionStart: start, selectionEnd: end, value } = state;
-    const selectionStartLine = value.slice(0, start).lastIndexOf("\n") + 1;
-    const nextLineBreak = value.indexOf("\n", end);
-    const selectionEndLine = nextLineBreak >= 0 ? nextLineBreak : value.length;
-    const selectedLines = value.slice(selectionStartLine, selectionEndLine).split("\n");
-    const indentation = " ".repeat(tabSize);
-    const outdentedLines = selectedLines.map((line) =>
-        line.startsWith(indentation) ? line.slice(tabSize) : line.replace(/^ +/, "")
-    );
-
-    let removedCharacters = 0;
-    let removedFromFirstLine = 0;
-    selectedLines.forEach((line, index) => {
-        const removed = line.length - outdentedLines[index].length;
-        removedCharacters += removed;
-        if (index === 0) {
-            removedFromFirstLine = removed;
-        }
-    });
-
+    const range = getSelectedLineRange(state);
+    const removedSpacesByLine = range.lines.map((line) => countLeadingSpaces(line, tabSize));
+    const text = range.lines.map((line, index) => line.slice(removedSpacesByLine[index])).join("\n");
     return createEdit(
         state,
-        selectionStartLine,
-        selectionEndLine,
-        outdentedLines.join("\n"),
-        Math.max(start - removedFromFirstLine, selectionStartLine),
-        Math.max(end - removedCharacters, selectionStartLine)
+        range.replaceStart,
+        range.replaceEnd,
+        text,
+        mapPositionAfterOutdent(state.selectionStart, range.lineStarts, removedSpacesByLine),
+        mapPositionAfterOutdent(state.selectionEnd, range.lineStarts, removedSpacesByLine)
     );
 };
 

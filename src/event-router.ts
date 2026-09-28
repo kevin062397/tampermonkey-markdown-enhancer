@@ -30,19 +30,19 @@ const WRAP_CHARACTERS: Record<string, WrapCharacters> = {
 
 const TAB_SIZE = 4;
 
-const getOSModifierKey = (): "ctrl" | "meta" => {
-    const platform = navigator.platform.toLowerCase();
-    return platform.includes("mac") ? "meta" : "ctrl";
+const isApplePlatform = (): boolean => /Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+const isPrimaryModifierPressed = (event: KeyboardEvent): boolean => {
+    if (event.altKey || event.shiftKey) {
+        return false;
+    }
+    return isApplePlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 };
 
 const handleEditorKeydown = (event: KeyboardEvent, textArea: HTMLTextAreaElement): void => {
     const isSelectionPresent = textArea.selectionStart !== textArea.selectionEnd;
-    const osModifierKey = getOSModifierKey();
-    const isModifierKey =
-        (osModifierKey === "meta" && event.metaKey && !event.ctrlKey) ||
-        (osModifierKey === "ctrl" && event.ctrlKey && !event.metaKey);
 
-    if (isModifierKey && event.key.toLowerCase() === "b") {
+    if (isPrimaryModifierPressed(event) && event.key.toLowerCase() === "b") {
         event.preventDefault();
         if (isSelectionPresent) {
             toggleWrapCommand(textArea, "**");
@@ -50,7 +50,7 @@ const handleEditorKeydown = (event: KeyboardEvent, textArea: HTMLTextAreaElement
         return;
     }
 
-    if (isModifierKey && event.key.toLowerCase() === "i") {
+    if (isPrimaryModifierPressed(event) && event.key.toLowerCase() === "i") {
         event.preventDefault();
         if (isSelectionPresent) {
             toggleWrapCommand(textArea, "*");
