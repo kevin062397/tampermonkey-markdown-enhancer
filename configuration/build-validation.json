@@ -10,6 +10,6 @@
         "version": ["1.5.0"]
     },
     "requiredMetadata": ["icon", "icon64"],
-    "runtimeMarkers": ["markdownEnhancerAttached", "MutationObserver", "addEventListener"],
+    "runtimeMarkers": ["initializeMarkdownEnhancer", "addEventListener(\"keydown\"", "addEventListener(\"paste\""],
     "sourceEntry": "src/index.user.ts"
 }

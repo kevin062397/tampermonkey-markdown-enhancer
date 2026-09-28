@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const NativeMutationObserver = globalThis.MutationObserver;
-const activeObservers: MutationObserver[] = [];
+let disposeEnhancer: (() => void) | undefined;
 
 const createSupportedEditor = (): HTMLTextAreaElement => {
     const textArea = document.createElement("textarea");
@@ -10,7 +9,8 @@ const createSupportedEditor = (): HTMLTextAreaElement => {
 };
 
 const loadEnhancer = async (): Promise<void> => {
-    await import("./index.user");
+    const module = await import("./index.user");
+    disposeEnhancer = module.disposeMarkdownEnhancer;
 };
 
 const dispatchKey = (textArea: HTMLTextAreaElement, key: string, init: KeyboardEventInit = {}): KeyboardEvent => {
@@ -40,49 +40,44 @@ const dispatchPaste = (textArea: HTMLTextAreaElement, text: string): Event => {
     return event;
 };
 
-const flushMutations = async (): Promise<void> => {
-    await Promise.resolve();
-    await Promise.resolve();
-};
-
 beforeEach(() => {
     vi.resetModules();
     document.body.innerHTML = "";
-    activeObservers.length = 0;
-
-    class TrackedMutationObserver extends NativeMutationObserver {
-        constructor(callback: MutationCallback) {
-            super(callback);
-            activeObservers.push(this);
-        }
-    }
-
-    vi.stubGlobal("MutationObserver", TrackedMutationObserver);
+    disposeEnhancer = undefined;
 });
 
 afterEach(() => {
-    for (const observer of activeObservers) {
-        observer.disconnect();
-    }
-    vi.unstubAllGlobals();
+    disposeEnhancer?.();
+    delete (document as unknown as { execCommand?: Document["execCommand"] }).execCommand;
+    vi.restoreAllMocks();
     document.body.innerHTML = "";
 });
 
 describe("Markdown Enhancer", () => {
-    test("attaches to generic textarea editors", async () => {
+    test("routes events from generic textarea editors", async () => {
         const first = createSupportedEditor();
+        first.value = "first";
+        first.setSelectionRange(0, first.value.length);
         const second = createSupportedEditor();
-
+        second.value = "second";
+        second.setSelectionRange(0, second.value.length);
         await loadEnhancer();
 
-        expect(first.dataset.markdownEnhancerAttached).toBe("true");
-        expect(second.dataset.markdownEnhancerAttached).toBe("true");
+        dispatchKey(first, "(");
+        dispatchKey(second, "[");
+
+        expect(first.value).toBe("(first)");
+        expect(second.value).toBe("[second]");
     });
 
-    test("wraps selected text and preserves the inner selection", async () => {
+    test("wraps selected text and preserves editor state", async () => {
         const textArea = createSupportedEditor();
         textArea.value = "review";
-        textArea.setSelectionRange(0, textArea.value.length);
+        textArea.setSelectionRange(0, textArea.value.length, "backward");
+        textArea.scrollTop = 12;
+        textArea.scrollLeft = 4;
+        const inputEvents: InputEvent[] = [];
+        textArea.addEventListener("input", (event) => inputEvents.push(event as InputEvent));
         await loadEnhancer();
 
         const event = dispatchKey(textArea, "(");
@@ -90,6 +85,35 @@ describe("Markdown Enhancer", () => {
         expect(event.defaultPrevented).toBe(true);
         expect(textArea.value).toBe("(review)");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([1, 7]);
+        expect(textArea.selectionDirection).toBe("backward");
+        expect([textArea.scrollTop, textArea.scrollLeft]).toEqual([12, 4]);
+        expect(document.activeElement).toBe(textArea);
+        expect(inputEvents).toHaveLength(1);
+        expect(inputEvents[0].inputType).toBe("insertText");
+        expect(inputEvents[0].data).toBe("(review)");
+    });
+
+    test("does not duplicate input events from a successful native transaction", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        const inputEvents: InputEvent[] = [];
+        textArea.addEventListener("input", (event) => inputEvents.push(event as InputEvent));
+        const executeCommand = vi.fn((command: string, isUIShown?: boolean, value = "") => {
+            void isUIShown;
+            const { selectionStart, selectionEnd } = textArea;
+            textArea.setRangeText(value, selectionStart, selectionEnd, "select");
+            textArea.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: command }));
+            return true;
+        });
+        Object.defineProperty(document, "execCommand", { configurable: true, value: executeCommand });
+        await loadEnhancer();
+
+        dispatchKey(textArea, "(");
+
+        expect(executeCommand).toHaveBeenCalledOnce();
+        expect(inputEvents).toHaveLength(1);
+        expect(textArea.value).toBe("(review)");
     });
 
     test("requires a selection before wrapping quotes", async () => {
@@ -175,22 +199,23 @@ describe("Markdown Enhancer", () => {
         expect(textArea.value).toBe("documentation");
     });
 
-    test("attaches to editors added after startup", async () => {
+    test("routes events from editors added after startup", async () => {
         await loadEnhancer();
-
         const textArea = createSupportedEditor();
-        await flushMutations();
+        textArea.value = "dynamic";
+        textArea.setSelectionRange(0, textArea.value.length);
 
-        expect(textArea.dataset.markdownEnhancerAttached).toBe("true");
+        dispatchKey(textArea, "(");
+
+        expect(textArea.value).toBe("(dynamic)");
     });
 
-    test("does not attach duplicate listeners after later DOM mutations", async () => {
-        const textArea = createSupportedEditor();
-        const addEventListener = vi.spyOn(textArea, "addEventListener");
+    test("registers only one delegated listener for each editor event", async () => {
+        const addEventListener = vi.spyOn(document, "addEventListener");
         await loadEnhancer();
 
         document.body.append(document.createElement("div"));
-        await flushMutations();
+        createSupportedEditor();
 
         expect(addEventListener.mock.calls.filter(([type]) => type === "keydown")).toHaveLength(1);
         expect(addEventListener.mock.calls.filter(([type]) => type === "paste")).toHaveLength(1);
