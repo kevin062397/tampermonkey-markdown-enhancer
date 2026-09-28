@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-
 import type { EditorState } from "./editor-state";
 import {
     isCharacterEscaped,

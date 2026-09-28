@@ -29,7 +29,17 @@ describe("Command registry", () => {
             { id: EDITOR_COMMAND_IDS.italic, label: "Italic" },
             { id: EDITOR_COMMAND_IDS.strikethrough, label: "Strikethrough" },
             { id: EDITOR_COMMAND_IDS.inlineCode, label: "Inline code" },
-            { id: EDITOR_COMMAND_IDS.link, label: "Link" }
+            { id: EDITOR_COMMAND_IDS.link, label: "Link" },
+            { id: EDITOR_COMMAND_IDS.heading1, label: "Heading 1" },
+            { id: EDITOR_COMMAND_IDS.heading2, label: "Heading 2" },
+            { id: EDITOR_COMMAND_IDS.heading3, label: "Heading 3" },
+            { id: EDITOR_COMMAND_IDS.heading4, label: "Heading 4" },
+            { id: EDITOR_COMMAND_IDS.heading5, label: "Heading 5" },
+            { id: EDITOR_COMMAND_IDS.heading6, label: "Heading 6" },
+            { id: EDITOR_COMMAND_IDS.blockquote, label: "Blockquote" },
+            { id: EDITOR_COMMAND_IDS.bulletList, label: "Bullet list" },
+            { id: EDITOR_COMMAND_IDS.numberedList, label: "Numbered list" },
+            { id: EDITOR_COMMAND_IDS.taskList, label: "Task list" }
         ]);
         expect(registry.findCommandByShortcut("B", true, context)?.id).toBe(EDITOR_COMMAND_IDS.bold);
         expect(registry.findCommandByShortcut("i", true, context)?.id).toBe(EDITOR_COMMAND_IDS.italic);
@@ -189,6 +199,21 @@ describe("Command registry", () => {
         expect(registry.executeCommand(EDITOR_COMMAND_IDS.link, context)).toBe(true);
         expect(textArea.value).toBe(String.raw`  [link text](https://example.com/a_\(b\)%3Cc%3E)  `);
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 12]);
+    });
+
+    test("executes line-prefix commands for collapsed selections", () => {
+        const registry = createCommandRegistry();
+        const textArea = createTextArea("title", 2, 2);
+        const context = { textArea };
+
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.heading3)?.isAvailable(context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.heading3, context)).toBe(true);
+        expect(textArea.value).toBe("### title");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([6, 6]);
+
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.heading3, context)).toBe(true);
+        expect(textArea.value).toBe("title");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 2]);
     });
 
     test("resolves shortcut conflicts with injected-command availability", () => {

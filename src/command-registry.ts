@@ -1,11 +1,22 @@
-import { insertMarkdownLinkCommand, toggleWrapCommand } from "./commands";
+import { insertMarkdownLinkCommand, toggleLinePrefixCommand, toggleWrapCommand } from "./commands";
+import type { LinePrefixKind } from "./line-prefixes";
 
 export const EDITOR_COMMAND_IDS = {
+    blockquote: "line.blockquote",
     bold: "format.bold",
+    bulletList: "line.bulletList",
+    heading1: "line.heading1",
+    heading2: "line.heading2",
+    heading3: "line.heading3",
+    heading4: "line.heading4",
+    heading5: "line.heading5",
+    heading6: "line.heading6",
     inlineCode: "format.inlineCode",
     italic: "format.italic",
     link: "insert.link",
-    strikethrough: "format.strikethrough"
+    numberedList: "line.numberedList",
+    strikethrough: "format.strikethrough",
+    taskList: "line.taskList"
 } as const;
 
 export interface EditorCommandContext {
@@ -46,6 +57,9 @@ const isFormattingAvailable = ({ textArea }: EditorCommandContext): boolean =>
     !textArea.disabled &&
     /\S/.test(textArea.value.slice(textArea.selectionStart, textArea.selectionEnd));
 
+const isLineFormattingAvailable = ({ textArea }: EditorCommandContext): boolean =>
+    !textArea.readOnly && !textArea.disabled;
+
 const isCommandShortcutMatch = (command: EditorCommand, key: string, isPrimaryModifierPressed: boolean): boolean =>
     command.shortcut?.key.toLowerCase() === key.toLowerCase() &&
     command.shortcut.isPrimaryModifierRequired === isPrimaryModifierPressed;
@@ -62,6 +76,26 @@ const createFormattingCommand = (
     isAvailable: isFormattingAvailable,
     execute: ({ textArea }) => toggleWrapCommand(textArea, wrap)
 });
+
+const createLinePrefixCommand = (id: string, label: string, kind: LinePrefixKind): EditorCommand => ({
+    id,
+    label,
+    isAvailable: isLineFormattingAvailable,
+    execute: ({ textArea }) => toggleLinePrefixCommand(textArea, kind)
+});
+
+const createLinePrefixCommands = (): readonly EditorCommand[] => [
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading1, "Heading 1", "heading1"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading2, "Heading 2", "heading2"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading3, "Heading 3", "heading3"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading4, "Heading 4", "heading4"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading5, "Heading 5", "heading5"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading6, "Heading 6", "heading6"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.blockquote, "Blockquote", "blockquote"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.bulletList, "Bullet list", "bulletList"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.numberedList, "Numbered list", "numberedList"),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.taskList, "Task list", "taskList")
+];
 
 const createCoreCommands = (): readonly EditorCommand[] => [
     createFormattingCommand(EDITOR_COMMAND_IDS.bold, "Bold", "**", {
@@ -80,7 +114,8 @@ const createCoreCommands = (): readonly EditorCommand[] => [
         shortcut: { key: "k", isPrimaryModifierRequired: true },
         isAvailable: isFormattingAvailable,
         execute: ({ textArea }) => insertMarkdownLinkCommand(textArea)
-    }
+    },
+    ...createLinePrefixCommands()
 ];
 
 export const createCommandRegistry = (additionalCommands: readonly EditorCommand[] = []): EditorCommandRegistry => {

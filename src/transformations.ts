@@ -1,4 +1,5 @@
 import type { EditOperation, EditorSelectionDirection, EditorState } from "./editor-state";
+import { getSelectedLineRange } from "./line-ranges";
 import {
     isCharacterEscaped,
     isClosingPairCharacter,
@@ -231,30 +232,6 @@ export const wrapSelection = (state: EditorState, leading: string, trailing: str
 
 export const toggleWrap = (state: EditorState, wrap: string): EditOperation | null =>
     wrap === "*" || wrap === "**" ? handleMarkdownToggle(state, wrap) : handleGenericToggle(state, wrap);
-
-interface SelectedLineRange {
-    readonly replaceStart: number;
-    readonly replaceEnd: number;
-    readonly lines: readonly string[];
-    readonly lineStarts: readonly number[];
-}
-
-const getSelectedLineRange = (state: EditorState): SelectedLineRange => {
-    const replaceStart = state.value.slice(0, state.selectionStart).lastIndexOf("\n") + 1;
-    const isSelectionEndingAtLineStart =
-        state.selectionEnd > state.selectionStart && state.value[state.selectionEnd - 1] === "\n";
-    const lineLookupEnd = isSelectionEndingAtLineStart ? state.selectionEnd - 1 : state.selectionEnd;
-    const nextLineBreak = state.value.indexOf("\n", lineLookupEnd);
-    const replaceEnd = nextLineBreak >= 0 ? nextLineBreak : state.value.length;
-    const lines = state.value.slice(replaceStart, replaceEnd).split("\n");
-    const lineStarts: number[] = [];
-    let lineStart = replaceStart;
-    for (const line of lines) {
-        lineStarts.push(lineStart);
-        lineStart += line.length + 1;
-    }
-    return { replaceStart, replaceEnd, lines, lineStarts };
-};
 
 const mapPositionAfterIndent = (position: number, lineStarts: readonly number[], tabSize: number): number => {
     const addedLineCount = lineStarts.filter((lineStart) => lineStart <= position).length;
