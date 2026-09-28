@@ -473,6 +473,78 @@ describe("Markdown Enhancer", () => {
         expect(textArea.value).toBe("review");
     });
 
+    test("continues Markdown structures with Enter", async () => {
+        const textArea = createSupportedEditor();
+        await loadEnhancer();
+
+        for (const [value, expected] of [
+            ["- item", "- item\n- "],
+            ["9. item", "9. item\n10. "],
+            ["- [x] done", "- [x] done\n- [ ] "],
+            ["  > quote", "  > quote\n  > "],
+            [">> quote", ">> quote\n>> "],
+            ["    indented", "    indented\n    "]
+        ]) {
+            textArea.value = value;
+            textArea.setSelectionRange(value.length, value.length);
+            const event = dispatchKey(textArea, "Enter");
+            expect(event.defaultPrevented).toBe(true);
+            expect(textArea.value).toBe(expected);
+            expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([expected.length, expected.length]);
+        }
+    });
+
+    test("exits empty Markdown structures while preserving unrelated indentation", async () => {
+        const textArea = createSupportedEditor();
+        await loadEnhancer();
+
+        for (const [value, expected] of [
+            ["- ", ""],
+            ["1. ", ""],
+            ["- [ ] ", ""],
+            ["> ", ""],
+            ["item\n  - ", "item\n  "]
+        ]) {
+            textArea.value = value;
+            textArea.setSelectionRange(value.length, value.length);
+            const event = dispatchKey(textArea, "Enter");
+            expect(event.defaultPrevented).toBe(true);
+            expect(textArea.value).toBe(expected);
+        }
+    });
+
+    test("leaves unsupported Enter contexts to the browser", async () => {
+        const textArea = createSupportedEditor();
+        await loadEnhancer();
+
+        textArea.value = "plain";
+        textArea.setSelectionRange(5, 5);
+        expect(dispatchKey(textArea, "Enter").defaultPrevented).toBe(false);
+
+        textArea.value = "- selected";
+        textArea.setSelectionRange(2, 10);
+        expect(dispatchKey(textArea, "Enter").defaultPrevented).toBe(false);
+        textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+        expect(dispatchKey(textArea, "Enter", { shiftKey: true }).defaultPrevented).toBe(false);
+        expect(dispatchKey(textArea, "Enter", { ctrlKey: true }).defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("- selected");
+    });
+
+    test("nests a Markdown structure with Tab and reverses it with Shift+Tab", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "- item";
+        textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+        await loadEnhancer();
+
+        dispatchKey(textArea, "Tab");
+        expect(textArea.value).toBe("    - item");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([10, 10]);
+
+        dispatchKey(textArea, "Tab", { shiftKey: true });
+        expect(textArea.value).toBe("- item");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([6, 6]);
+    });
+
     test("inserts spaces up to the next four-column tab stop", async () => {
         const textArea = createSupportedEditor();
         textArea.value = "ab";

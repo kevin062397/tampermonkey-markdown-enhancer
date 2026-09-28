@@ -1,7 +1,9 @@
 import type { EditorCommandRegistry } from "./command-registry";
 import {
+    continueMarkdownLineCommand,
     deleteEmptyPairCommand,
     indentCommand,
+    indentMarkdownLineCommand,
     insertSpacesCommand,
     outdentCommand,
     pasteMarkdownLinkCommand,
@@ -54,6 +56,11 @@ const handleEditorKeydown = (
         return;
     }
 
+    if (event.key === "Enter" && !event.shiftKey && isEditingModifierAllowed && continueMarkdownLineCommand(textArea)) {
+        event.preventDefault();
+        return;
+    }
+
     if (event.key === "Backspace" && !event.shiftKey && isEditingModifierAllowed && deleteEmptyPairCommand(textArea)) {
         event.preventDefault();
         return;
@@ -79,7 +86,7 @@ const handleEditorKeydown = (
         event.preventDefault();
         if (isSelectionPresent) {
             indentCommand(textArea, TAB_SIZE);
-        } else {
+        } else if (!indentMarkdownLineCommand(textArea, TAB_SIZE)) {
             insertSpacesCommand(textArea, TAB_SIZE);
         }
     }

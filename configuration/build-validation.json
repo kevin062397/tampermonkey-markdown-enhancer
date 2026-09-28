@@ -15,6 +15,7 @@
         "createCommandRegistry",
         "deleteEmptyPair",
         "toggleLinePrefix",
+        "continueMarkdownLine",
         "isTextReplacementRequired",
         "addEventListener(\"keydown\"",
         "addEventListener(\"paste\""

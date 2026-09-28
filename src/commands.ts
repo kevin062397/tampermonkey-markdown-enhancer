@@ -1,6 +1,7 @@
 import { applyEditTransaction } from "./edit-transaction";
 import { readEditorState, type EditorTransform } from "./editor-state";
 import { toggleLinePrefix, type LinePrefixKind } from "./line-prefixes";
+import { continueMarkdownLine, indentMarkdownLine } from "./markdown-lines";
 import {
     createMarkdownLinkFromPaste,
     createMarkdownLinkFromSelection,
@@ -36,6 +37,12 @@ export const toggleWrapCommand = (textArea: HTMLTextAreaElement, wrap: string): 
 
 export const toggleLinePrefixCommand = (textArea: HTMLTextAreaElement, kind: LinePrefixKind): boolean =>
     executeTransform(textArea, (state) => toggleLinePrefix(state, kind));
+
+export const continueMarkdownLineCommand = (textArea: HTMLTextAreaElement): boolean =>
+    executeTransform(textArea, continueMarkdownLine);
+
+export const indentMarkdownLineCommand = (textArea: HTMLTextAreaElement, tabSize: number): boolean =>
+    executeTransform(textArea, (state) => indentMarkdownLine(state, tabSize));
 
 export const indentCommand = (textArea: HTMLTextAreaElement, tabSize: number): boolean =>
     executeTransform(textArea, (state) => indentSelectedLines(state, tabSize));
