@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import monkey from "vite-plugin-monkey";
 
@@ -22,5 +23,8 @@ export default defineConfig({
         outDir: "dist",
         sourcemap: false,
         target: "es2015"
+    },
+    test: {
+        environment: "jsdom"
     }
 });
