@@ -1,9 +1,16 @@
-import { insertMarkdownLinkCommand, toggleLinePrefixCommand, toggleWrapCommand } from "./commands";
+import {
+    insertMarkdownLinkCommand,
+    toggleFencedCodeBlockCommand,
+    toggleInlineCodeCommand,
+    toggleLinePrefixCommand,
+    toggleWrapCommand
+} from "./commands";
 import type { LinePrefixKind } from "./line-prefixes";
 
 export const EDITOR_COMMAND_IDS = {
     blockquote: "line.blockquote",
     bold: "format.bold",
+    codeBlock: "format.codeBlock",
     bulletList: "line.bulletList",
     heading1: "line.heading1",
     heading2: "line.heading2",
@@ -60,6 +67,9 @@ const isFormattingAvailable = ({ textArea }: EditorCommandContext): boolean =>
 const isLineFormattingAvailable = ({ textArea }: EditorCommandContext): boolean =>
     !textArea.readOnly && !textArea.disabled;
 
+const isCodeBlockAvailable = ({ textArea }: EditorCommandContext): boolean =>
+    !textArea.readOnly && !textArea.disabled && textArea.selectionStart !== textArea.selectionEnd;
+
 const isCommandShortcutMatch = (command: EditorCommand, key: string, isPrimaryModifierPressed: boolean): boolean =>
     command.shortcut?.key.toLowerCase() === key.toLowerCase() &&
     command.shortcut.isPrimaryModifierRequired === isPrimaryModifierPressed;
@@ -107,7 +117,18 @@ const createCoreCommands = (): readonly EditorCommand[] => [
         isPrimaryModifierRequired: true
     }),
     createFormattingCommand(EDITOR_COMMAND_IDS.strikethrough, "Strikethrough", "~~"),
-    createFormattingCommand(EDITOR_COMMAND_IDS.inlineCode, "Inline code", "`"),
+    {
+        id: EDITOR_COMMAND_IDS.inlineCode,
+        label: "Inline code",
+        isAvailable: isFormattingAvailable,
+        execute: ({ textArea }) => toggleInlineCodeCommand(textArea)
+    },
+    {
+        id: EDITOR_COMMAND_IDS.codeBlock,
+        label: "Code block",
+        isAvailable: isCodeBlockAvailable,
+        execute: ({ textArea }) => toggleFencedCodeBlockCommand(textArea)
+    },
     {
         id: EDITOR_COMMAND_IDS.link,
         label: "Link",

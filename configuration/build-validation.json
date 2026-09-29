@@ -16,6 +16,7 @@
         "deleteEmptyPair",
         "toggleLinePrefix",
         "continueMarkdownLine",
+        "toggleFencedCodeBlock",
         "isTextReplacementRequired",
         "addEventListener(\"keydown\"",
         "addEventListener(\"paste\""

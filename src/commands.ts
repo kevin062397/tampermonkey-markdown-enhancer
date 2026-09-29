@@ -1,3 +1,4 @@
+import { toggleFencedCodeBlock, toggleInlineCode } from "./code-formatting";
 import { applyEditTransaction } from "./edit-transaction";
 import { readEditorState, type EditorTransform } from "./editor-state";
 import { toggleLinePrefix, type LinePrefixKind } from "./line-prefixes";
@@ -34,6 +35,12 @@ export const wrapSelectionCommand = (textArea: HTMLTextAreaElement, leading: str
 
 export const toggleWrapCommand = (textArea: HTMLTextAreaElement, wrap: string): boolean =>
     executeTransform(textArea, (state) => toggleWrap(state, wrap));
+
+export const toggleInlineCodeCommand = (textArea: HTMLTextAreaElement): boolean =>
+    executeTransform(textArea, toggleInlineCode);
+
+export const toggleFencedCodeBlockCommand = (textArea: HTMLTextAreaElement): boolean =>
+    executeTransform(textArea, toggleFencedCodeBlock);
 
 export const toggleLinePrefixCommand = (textArea: HTMLTextAreaElement, kind: LinePrefixKind): boolean =>
     executeTransform(textArea, (state) => toggleLinePrefix(state, kind));

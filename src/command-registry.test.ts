@@ -29,6 +29,7 @@ describe("Command registry", () => {
             { id: EDITOR_COMMAND_IDS.italic, label: "Italic" },
             { id: EDITOR_COMMAND_IDS.strikethrough, label: "Strikethrough" },
             { id: EDITOR_COMMAND_IDS.inlineCode, label: "Inline code" },
+            { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code block" },
             { id: EDITOR_COMMAND_IDS.link, label: "Link" },
             { id: EDITOR_COMMAND_IDS.heading1, label: "Heading 1" },
             { id: EDITOR_COMMAND_IDS.heading2, label: "Heading 2" },
@@ -54,6 +55,7 @@ describe("Command registry", () => {
 
         expect(registry.getCommand(EDITOR_COMMAND_IDS.bold)?.isAvailable(context)).toBe(false);
         expect(registry.getCommand(EDITOR_COMMAND_IDS.link)?.isAvailable(context)).toBe(false);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.codeBlock)?.isAvailable(context)).toBe(true);
         expect(registry.executeCommand(EDITOR_COMMAND_IDS.bold, context)).toBe(false);
         expect(registry.executeCommand(EDITOR_COMMAND_IDS.link, context)).toBe(false);
         expect(textArea.value).toBe("   ");
@@ -163,6 +165,26 @@ describe("Command registry", () => {
         expect(registry.executeCommand(EDITOR_COMMAND_IDS.inlineCode, context)).toBe(true);
         expect(textArea.value).toBe("hello");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 5]);
+    });
+
+    test("executes the code-block command and selects its language placeholder", () => {
+        const registry = createCommandRegistry();
+        const textArea = createTextArea("code", 0, 4);
+        const context = { textArea };
+
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.codeBlock, context)).toBe(true);
+        expect(textArea.value).toBe("```language\ncode\n```");
+        expect(textArea.value.slice(textArea.selectionStart, textArea.selectionEnd)).toBe("language");
+
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.codeBlock, context)).toBe(true);
+        expect(textArea.value).toBe("code");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 4]);
+
+        textArea.setSelectionRange(2, 2);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.codeBlock)?.isAvailable(context)).toBe(false);
+        textArea.setSelectionRange(0, 4);
+        textArea.readOnly = true;
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.codeBlock)?.isAvailable(context)).toBe(false);
     });
 
     test("inserts an editable URL placeholder for selected label text", () => {
