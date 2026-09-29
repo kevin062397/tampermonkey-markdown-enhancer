@@ -11,6 +11,7 @@ export interface EditorAdapter {
     readonly capabilities: EditorAdapterCapabilities;
     readonly commands?: readonly EditorCommand[];
     readonly toolbarPlacement?: EditorToolbarPlacement;
+    readonly shouldDispatchChangeEventAfterEdit?: boolean;
     readonly isPageSupported: (url: URL) => boolean;
     readonly isEditor: (element: Element) => element is HTMLTextAreaElement;
 }

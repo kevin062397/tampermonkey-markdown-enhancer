@@ -15,6 +15,7 @@ import { isClosingPairCharacter, PAIRED_CHARACTERS, type PairedCharacterDefiniti
 export interface RoutedEditor {
     readonly textArea: HTMLTextAreaElement;
     readonly commandRegistry: EditorCommandRegistry;
+    readonly shouldDispatchChangeEventAfterEdit: boolean;
 }
 
 export type EditorEventResolver = (event: Event) => RoutedEditor | null;
@@ -112,25 +113,41 @@ const handleEditorPaste = (event: ClipboardEvent, textArea: HTMLTextAreaElement)
     }
 };
 
+const dispatchChangeEventIfRequired = (editor: RoutedEditor, valueBeforeEdit: string): void => {
+    if (editor.shouldDispatchChangeEventAfterEdit && editor.textArea.value !== valueBeforeEdit) {
+        editor.textArea.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    }
+};
+
 export const attachEditorEventRouter = (resolveEditor: EditorEventResolver): (() => void) => {
     const handleKeydown = (event: KeyboardEvent): void => {
+        if (event.defaultPrevented || event.isComposing) {
+            return;
+        }
         const editor = resolveEditor(event);
         if (editor) {
+            const valueBeforeEdit = editor.textArea.value;
             handleEditorKeydown(event, editor.textArea, editor.commandRegistry);
+            dispatchChangeEventIfRequired(editor, valueBeforeEdit);
         }
     };
     const handlePaste = (event: ClipboardEvent): void => {
+        if (event.defaultPrevented) {
+            return;
+        }
         const editor = resolveEditor(event);
         if (editor) {
+            const valueBeforeEdit = editor.textArea.value;
             handleEditorPaste(event, editor.textArea);
+            dispatchChangeEventIfRequired(editor, valueBeforeEdit);
         }
     };
 
-    document.addEventListener("keydown", handleKeydown, true);
-    document.addEventListener("paste", handlePaste, true);
+    document.addEventListener("keydown", handleKeydown);
+    document.addEventListener("paste", handlePaste);
 
     return () => {
-        document.removeEventListener("keydown", handleKeydown, true);
-        document.removeEventListener("paste", handlePaste, true);
+        document.removeEventListener("keydown", handleKeydown);
+        document.removeEventListener("paste", handlePaste);
     };
 };

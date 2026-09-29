@@ -19,6 +19,7 @@
         "toggleFencedCodeBlock",
         "resolveEditorFromEvent",
         "generic-textarea",
+        "shouldDispatchChangeEventAfterEdit",
         "isTextReplacementRequired",
         "addEventListener(\"keydown\"",
         "addEventListener(\"paste\""

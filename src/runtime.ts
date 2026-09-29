@@ -29,7 +29,8 @@ export const initializeMarkdownEnhancer = (
         return editor
             ? {
                   textArea: editor.textArea,
-                  commandRegistry: commandRegistries.get(editor.adapter)!
+                  commandRegistry: commandRegistries.get(editor.adapter)!,
+                  shouldDispatchChangeEventAfterEdit: editor.adapter.shouldDispatchChangeEventAfterEdit ?? false
               }
             : null;
     };

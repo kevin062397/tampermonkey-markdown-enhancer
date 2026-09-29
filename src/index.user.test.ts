@@ -695,15 +695,21 @@ describe("Markdown Enhancer", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 3]);
     });
 
-    test("routes events from editors added after startup", async () => {
+    test("routes events from editors added and replaced after startup", async () => {
         await loadEnhancer();
         const textArea = createSupportedEditor();
         textArea.value = "dynamic";
         textArea.setSelectionRange(0, textArea.value.length);
 
         dispatchKey(textArea, "(");
-
         expect(textArea.value).toBe("(dynamic)");
+
+        textArea.remove();
+        const replacement = createSupportedEditor();
+        replacement.value = "replacement";
+        replacement.setSelectionRange(0, replacement.value.length);
+        dispatchKey(replacement, "[");
+        expect(replacement.value).toBe("[replacement]");
     });
 
     test("registers only one delegated listener for each editor event", async () => {

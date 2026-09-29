@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-
 import type { MonkeyUserScript } from "vite-plugin-monkey";
 
 const icon = `data:image/png;base64,${readFileSync("assets/script-icon-markdown-16.png", "base64")}`;

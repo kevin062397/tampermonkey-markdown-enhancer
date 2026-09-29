@@ -25,8 +25,8 @@ const createTextArea = (adapterId = "editor"): HTMLTextAreaElement => {
     return textArea;
 };
 
-const dispatchKey = (textArea: HTMLTextAreaElement, key: string): KeyboardEvent => {
-    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key });
+const dispatchKey = (textArea: HTMLTextAreaElement, key: string, init: KeyboardEventInit = {}): KeyboardEvent => {
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key, ...init });
     textArea.dispatchEvent(event);
     return event;
 };
@@ -163,6 +163,56 @@ describe("Markdown enhancer runtime", () => {
         textArea.setSelectionRange(0, textArea.value.length);
         expect(dispatchKey(textArea, "(").defaultPrevented).toBe(false);
         expect(textArea.value).toBe("value");
+    });
+
+    test("defers to composing and page-consumed editor events", () => {
+        const adapter = createAdapter(
+            "deferred",
+            () => true,
+            (element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement
+        );
+        const textArea = createTextArea();
+        disposeEnhancer = initializeMarkdownEnhancer([], [adapter], new URL("https://example.test/editor"));
+
+        textArea.value = "- item";
+        textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+        expect(dispatchKey(textArea, "Enter", { isComposing: true }).defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("- item");
+
+        textArea.addEventListener("keydown", (event) => event.preventDefault(), { once: true });
+        expect(dispatchKey(textArea, "Enter").defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("- item");
+
+        textArea.value = "label";
+        textArea.setSelectionRange(0, textArea.value.length);
+        textArea.addEventListener("paste", (event) => event.preventDefault(), { once: true });
+        expect(dispatchPaste(textArea, "https://example.test").defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("label");
+    });
+
+    test("dispatches requested change events only after text edits", () => {
+        const adapter: EditorAdapter = {
+            ...createAdapter(
+                "change-aware",
+                () => true,
+                (element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement
+            ),
+            shouldDispatchChangeEventAfterEdit: true
+        };
+        const textArea = createTextArea();
+        const changeEvents: Event[] = [];
+        textArea.addEventListener("change", (event) => changeEvents.push(event));
+        disposeEnhancer = initializeMarkdownEnhancer([], [adapter], new URL("https://example.test/editor"));
+
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+        dispatchKey(textArea, "(");
+        expect(changeEvents).toHaveLength(1);
+
+        textArea.value = "()";
+        textArea.setSelectionRange(1, 1);
+        dispatchKey(textArea, ")");
+        expect(changeEvents).toHaveLength(1);
     });
 
     test("disposes delegated keyboard and paste listeners", () => {
