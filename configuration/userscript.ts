@@ -9,7 +9,7 @@ const userscript: MonkeyUserScript = {
     author: "Haoyuan Kevin Xia",
     description: "Enhance Markdown editing experience.",
     namespace: "https://github.com/kevin062397/TampermonkeyMarkdownEnhancer",
-    version: "1.5.0",
+    version: "1.6.0",
     match: "*://*/*",
     grant: "none",
     icon,
