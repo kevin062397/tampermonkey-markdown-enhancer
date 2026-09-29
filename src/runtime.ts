@@ -12,18 +12,19 @@ export const initializeMarkdownEnhancer = (
     adapters: readonly EditorAdapter[] = createDefaultEditorAdapters(),
     pageUrlSource: PageUrlSource = getCurrentPageUrl
 ): (() => void) => {
+    const configuredAdapters = [...adapters];
     const commandRegistries = new Map<EditorAdapter, EditorCommandRegistry>(
-        adapters.map((adapter) => [
+        configuredAdapters.map((adapter) => [
             adapter,
             createCommandRegistry([...additionalCommands, ...(adapter.commands ?? [])])
         ])
     );
-    if (adapters.length === 0) {
+    if (configuredAdapters.length === 0) {
         createCommandRegistry(additionalCommands);
     }
-    const getPageUrl = (): URL => (pageUrlSource instanceof URL ? pageUrlSource : pageUrlSource());
+    const getPageUrl = (): URL => (typeof pageUrlSource === "function" ? pageUrlSource() : pageUrlSource);
     const resolveEditor = (event: Event): RoutedEditor | null => {
-        const activeAdapters = getActiveEditorAdapters(adapters, getPageUrl());
+        const activeAdapters = getActiveEditorAdapters(configuredAdapters, getPageUrl());
         const editor = resolveEditorFromEvent(event, activeAdapters);
         return editor
             ? {

@@ -14,6 +14,15 @@ describe("Generic editor adapter", () => {
         expect(adapter.toolbarPlacement).toBe("after-editor");
     });
 
+    test("supports nested textareas without field-specific selectors", () => {
+        const adapter = createGenericEditorAdapter();
+        const container = document.createElement("article");
+        const textArea = document.createElement("textarea");
+        container.append(textArea);
+
+        expect(resolveEditorFromPath([textArea, container], [adapter])?.textArea).toBe(textArea);
+    });
+
     test("honors page exclusions and ignores unsupported elements", () => {
         const isPageExcluded = vi.fn((url: URL) => url.hostname === "excluded.example");
         const adapter = createGenericEditorAdapter({ isPageExcluded });

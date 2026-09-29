@@ -72,6 +72,37 @@ describe("Markdown enhancer runtime", () => {
         expect(dispatchKey(textArea, "(").defaultPrevented).toBe(true);
     });
 
+    test("snapshots adapters and accepts URL objects from another realm", () => {
+        const createScopedAdapter = (id: string): EditorAdapter =>
+            createAdapter(
+                id,
+                (url) => url.pathname === "/editor",
+                (element): element is HTMLTextAreaElement =>
+                    element instanceof HTMLTextAreaElement && element.dataset.adapter === id
+            );
+        const adapters: EditorAdapter[] = [createScopedAdapter("configured")];
+        const iframe = document.createElement("iframe");
+        document.body.append(iframe);
+        const ForeignUrl = (iframe.contentWindow as unknown as { readonly URL?: typeof URL } | null)?.URL;
+        if (!ForeignUrl) {
+            throw new Error("Expected iframe URL constructor");
+        }
+        const pageUrl = new ForeignUrl("https://example.test/editor");
+        disposeEnhancer = initializeMarkdownEnhancer([], adapters, pageUrl);
+        adapters.push(createScopedAdapter("added-later"));
+
+        const configuredEditor = createTextArea("configured");
+        configuredEditor.value = "configured";
+        configuredEditor.setSelectionRange(0, configuredEditor.value.length);
+        expect(dispatchKey(configuredEditor, "(").defaultPrevented).toBe(true);
+
+        const addedEditor = createTextArea("added-later");
+        addedEditor.value = "added";
+        addedEditor.setSelectionRange(0, addedEditor.value.length);
+        expect(dispatchKey(addedEditor, "(").defaultPrevented).toBe(false);
+        expect(addedEditor.value).toBe("added");
+    });
+
     test("scopes contributed commands to the adapter that resolved the editor", () => {
         const executeFirstCommand = vi.fn(() => true);
         const executeSecondCommand = vi.fn(() => true);
