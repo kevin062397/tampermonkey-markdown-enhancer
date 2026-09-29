@@ -1,60 +1,81 @@
-# TampermonkeyMarkdownEnhancer
+# Tampermonkey Markdown Enhancer
 
-**TampermonkeyMarkdownEnhancer** is a user script that enhances the Markdown editing experience in all `<textarea>` elements on any website. It provides keyboard shortcuts for wrapping text, toggling bold/italic, indenting/outdenting lines, and inserting spaces, making Markdown editing faster and more convenient.
+Tampermonkey Markdown Enhancer improves Markdown editing in writable `<textarea>` elements. It provides safe paired-character editing, Markdown-aware keyboard behavior, reusable formatting commands, and a locally built Tampermonkey userscript.
 
-## Features
+The userscript applies to connected, writable textareas under the universal `@match *://*/*` rule. Delegated event handling supports textareas mounted or replaced after page load.
 
-- **Quick Wrapping:**
-    - Select text and press any of the following keys to wrap the selection:
-        - For `"`, `'`, `` ` ``, `_`, `*`, `~`, a selection is required.
-        - For `(`, `[`, `{`, `<`, wrapping can occur without a selection.
-- **Toggle Bold/Italic:**
-    - **Bold:** Select text and press `Cmd+B` (macOS) or `Ctrl+B` (Windows/Linux) to toggle `**bold**` formatting.
-    - **Italic:** Select text and press `Cmd+I` (macOS) or `Ctrl+I` (Windows/Linux) to toggle `*italic*` formatting.
-- **Indentation with Tab:**
-    - Press `Tab` to indent the current line or all selected lines by 4 spaces (configurable in code).
-    - Press `Shift+Tab` to outdent the current line or all selected lines by up to 4 spaces.
-- **Smart Spaces:**
-    - Pressing `Tab` with no selection inserts spaces to the next tab stop (multiple of 4 spaces).
-- **Paste hyperlinks as Markdown links:**
-    - If there is selected text and a hyperlink (e.g., `https://example.com`) is pasted, the selected text will be wrapped in Markdown link syntax: `[selected text](https://example.com)`.
-    - If the clipboard content is not a hyperlink or there is no selection, the default paste behavior is used.
+## Editing Behavior
+
+### Shortcuts
+
+The primary modifier is `Command` on macOS and `Control` on other platforms.
+
+| Action                                                                               | Shortcut               |
+| ------------------------------------------------------------------------------------ | ---------------------- |
+| Toggle bold                                                                          | Primary modifier + `B` |
+| Toggle italic                                                                        | Primary modifier + `I` |
+| Insert a Markdown link                                                               | Primary modifier + `K` |
+| Indent selected lines or the current bullet, numbered, task-list, or blockquote line | `Tab`                  |
+| Outdent selected lines or the current line                                           | `Shift+Tab`            |
+| Continue or exit a Markdown line prefix                                              | `Enter`                |
+
+Bold and italic toggles preserve boundary whitespace and correctly transition existing asterisk marker depth. Link insertion turns selected text into `[text](url)` with the `url` placeholder selected; selecting a URL creates `[link text](url)` with the label selected.
+
+### Paired Characters
+
+- Typing `(`, `[`, `{`, or `<` with no selection inserts the matching closer and places the cursor inside.
+- With a selection, `(`, `[`, `{`, `<`, `"`, `'`, `` ` ``, `_`, `*`, and `~` wrap the selected text.
+- Typing a matched closing character at the cursor moves over it instead of duplicating it.
+- `Backspace` between an empty recognized pair removes both characters.
+- Escape-aware delimiter matching distinguishes literal characters, word-internal apostrophes, and properly nested pairs.
+
+### Markdown Lines and Paste
+
+- `Enter` continues bullet, numbered, task-list, blockquote, and indented lines. Numbered markers increment, task markers reset to unchecked, and pressing `Enter` on an empty prefixed line removes the prefix.
+- With no selection outside a recognized bullet, numbered, task-list, or blockquote line, `Tab` inserts spaces to the next four-column tab stop. The tab width is currently fixed at four spaces.
+- Pasting an `http`, `https`, `ftp`, or `mailto` URL over selected text creates an escaped Markdown link. Native paste behavior handles other clipboard content.
+- The delegated handler yields to IME composition and page handlers that consume keyboard or paste events first.
+
+## Built-In Command Registry
+
+The runtime includes commands for bold, italic, strikethrough, inline code, fenced code blocks, links, headings 1–6, blockquotes, bullet lists, numbered lists, and task lists. Bold, italic, and link have direct keyboard shortcuts.
 
 ## Installation
 
+Pull the repository and build it locally:
+
 1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser.
-2. Clone this repository and build the project locally:
+2. Pull and build the repository:
+
     ```sh
-    git clone https://github.com/kevin062397/TampermonkeyMarkdownEnhancer
-    cd TampermonkeyMarkdownEnhancer
-    npm install
+    git clone https://github.com/kevin062397/tampermonkey-markdown-enhancer.git
+    cd tampermonkey-markdown-enhancer
+    npm ci
     npm run build
     ```
-3. Create a new user script in Tampermonkey and paste the contents of `dist/index.user.js` into the editor.
-4. Save the script.
 
-## Usage
+3. Create a userscript in Tampermonkey, replace its contents with `dist/index.user.js`, and save it.
 
-- **Wrap text:**
-    - Select text and press a wrapping key (see above).
-- **Toggle bold:**
-    - Select text and press `Cmd+B` (macOS) or `Ctrl+B` (Windows/Linux).
-- **Toggle italic:**
-    - Select text and press `Cmd+I` (macOS) or `Ctrl+I` (Windows/Linux).
-- **Indent:**
-    - Select lines and press `Tab`.
-- **Outdent:**
-    - Select lines and press `Shift+Tab`.
-- **Insert spaces:**
-    - Place the cursor and press `Tab` (with no selection).
-- **Paste hyperlinks as Markdown links:**
-    - Select text and paste a hyperlink.
+To update the userscript, pull the repository changes, run `npm ci` and `npm run build`, and replace the installed userscript with the regenerated `dist/index.user.js`.
 
 ## Development
 
-- Source code: [src/index.user.ts](src/index.user.ts)
-- Build:
-    ```sh
-    npm install
-    npm run build
-    ```
+Install dependencies and run the development checks:
+
+```sh
+npm ci
+npm run build
+```
+
+The required verification is:
+
+```sh
+npm run build && npm run test
+```
+
+The build emits and validates exactly:
+
+- `dist/index.user.js`: the installable userscript.
+- `dist/index.meta.js`: the Tampermonkey metadata block.
+
+Build commands generate both artifacts. Tests are colocated with their source modules and run through Vitest in the shared Vite configuration.
