@@ -17,6 +17,8 @@
         "toggleLinePrefix",
         "continueMarkdownLine",
         "toggleFencedCodeBlock",
+        "resolveEditorFromEvent",
+        "generic-textarea",
         "isTextReplacementRequired",
         "addEventListener(\"keydown\"",
         "addEventListener(\"paste\""

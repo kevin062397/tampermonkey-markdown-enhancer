@@ -1,2 +1,4 @@
-export const isSupportedEditor = (target: EventTarget | null): target is HTMLTextAreaElement =>
-    target instanceof HTMLTextAreaElement && !target.readOnly && !target.disabled;
+import { createGenericEditorAdapter } from "./adapters/generic-editor-adapter";
+import type { EditorAdapter } from "./editor-adapter";
+
+export const createDefaultEditorAdapters = (): readonly EditorAdapter[] => [createGenericEditorAdapter()];

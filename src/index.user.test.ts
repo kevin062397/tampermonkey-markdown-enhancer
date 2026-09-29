@@ -38,6 +38,7 @@ const dispatchKey = (textArea: HTMLTextAreaElement, key: string, init: KeyboardE
     const event = new KeyboardEvent("keydown", {
         bubbles: true,
         cancelable: true,
+        composed: true,
         key,
         ...init
     });
@@ -55,7 +56,7 @@ const setUserAgent = (userAgent: string): void => {
 };
 
 const dispatchPaste = (textArea: HTMLTextAreaElement, text: string): Event => {
-    const event = new Event("paste", { bubbles: true, cancelable: true });
+    const event = new Event("paste", { bubbles: true, cancelable: true, composed: true });
     Object.defineProperty(event, "clipboardData", {
         value: {
             getData: (type: string) => (type === "text" ? text : "")
@@ -93,6 +94,46 @@ describe("Markdown Enhancer", () => {
 
         expect(first.value).toBe("(first)");
         expect(second.value).toBe("[second]");
+    });
+
+    test("leaves generic editors on excluded pages unchanged", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        const runtimeModule = await import("./runtime");
+        const adapterModule = await import("./adapters/generic-editor-adapter");
+        const adapter = adapterModule.createGenericEditorAdapter({ isPageExcluded: () => true });
+        disposeEnhancer = runtimeModule.initializeMarkdownEnhancer(
+            [],
+            [adapter],
+            new URL("https://excluded.example/editor")
+        );
+
+        const event = dispatchKey(textArea, "(");
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("review");
+    });
+
+    test("routes the same commands to generic editors in open shadow roots", async () => {
+        const host = document.createElement("div");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const textArea = document.createElement("textarea");
+        shadowRoot.append(textArea);
+        document.body.append(host);
+        await loadEnhancer();
+
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        const wrappingEvent = dispatchKey(textArea, "(");
+        expect(wrappingEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("(review)");
+
+        textArea.value = "review";
+        textArea.setSelectionRange(0, textArea.value.length);
+        const shortcutEvent = dispatchShortcut(textArea, "b");
+        expect(shortcutEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("**review**");
     });
 
     test("leaves read-only editors unchanged", async () => {

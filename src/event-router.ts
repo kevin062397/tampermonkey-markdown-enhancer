@@ -12,7 +12,12 @@ import {
 } from "./commands";
 import { isClosingPairCharacter, PAIRED_CHARACTERS, type PairedCharacterDefinition } from "./paired-characters";
 
-export type EditorTargetPredicate = (target: EventTarget | null) => target is HTMLTextAreaElement;
+export interface RoutedEditor {
+    readonly textArea: HTMLTextAreaElement;
+    readonly commandRegistry: EditorCommandRegistry;
+}
+
+export type EditorEventResolver = (event: Event) => RoutedEditor | null;
 
 const SELECTION_WRAP_CHARACTERS: Readonly<Record<string, PairedCharacterDefinition>> = {
     _: { leading: "_", trailing: "_", isSelectionRequired: true },
@@ -107,18 +112,17 @@ const handleEditorPaste = (event: ClipboardEvent, textArea: HTMLTextAreaElement)
     }
 };
 
-export const attachEditorEventRouter = (
-    isSupportedEditor: EditorTargetPredicate,
-    commandRegistry: EditorCommandRegistry
-): (() => void) => {
+export const attachEditorEventRouter = (resolveEditor: EditorEventResolver): (() => void) => {
     const handleKeydown = (event: KeyboardEvent): void => {
-        if (isSupportedEditor(event.target)) {
-            handleEditorKeydown(event, event.target, commandRegistry);
+        const editor = resolveEditor(event);
+        if (editor) {
+            handleEditorKeydown(event, editor.textArea, editor.commandRegistry);
         }
     };
     const handlePaste = (event: ClipboardEvent): void => {
-        if (isSupportedEditor(event.target)) {
-            handleEditorPaste(event, event.target);
+        const editor = resolveEditor(event);
+        if (editor) {
+            handleEditorPaste(event, editor.textArea);
         }
     };
 
