@@ -36,9 +36,10 @@ beforeEach(() => {
 });
 
 describe("Settings menu", () => {
-    test("registers exactly seven working menu actions", () => {
+    test("registers exactly eight working menu actions", () => {
         expect([...fixture.commands.keys()]).toEqual([
             "Toggle Markdown Editing",
+            "Toggle Formatting Toolbar",
             "Set Tab Width",
             "Set Bold Shortcut",
             "Set Italic Shortcut",
@@ -53,6 +54,13 @@ describe("Settings menu", () => {
         expect(fixture.store.getSettings().isEnabled).toBe(false);
         fixture.executeCommand("Toggle Markdown Editing");
         expect(fixture.store.getSettings().isEnabled).toBe(true);
+    });
+
+    test("applies the formatting toolbar toggle live", () => {
+        fixture.executeCommand("Toggle Formatting Toolbar");
+        expect(fixture.store.getSettings().isToolbarEnabled).toBe(false);
+        fixture.executeCommand("Toggle Formatting Toolbar");
+        expect(fixture.store.getSettings().isToolbarEnabled).toBe(true);
     });
 
     test("sets valid tab widths and leaves canceled or invalid values unchanged", () => {

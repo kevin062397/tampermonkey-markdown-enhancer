@@ -103,6 +103,12 @@ const registerEditingToggle = (environment: SettingsMenuEnvironment, store: Sett
     });
 };
 
+const registerToolbarToggle = (environment: SettingsMenuEnvironment, store: SettingsStore): void => {
+    environment.registerCommand("Toggle Formatting Toolbar", () => {
+        store.updateSettings((settings) => ({ isToolbarEnabled: !settings.isToolbarEnabled }));
+    });
+};
+
 const registerTabWidthAction = (environment: SettingsMenuEnvironment, store: SettingsStore): void => {
     environment.registerCommand("Set Tab Width", () => {
         const settings = store.getSettings();
@@ -170,6 +176,7 @@ const registerEditorSelectorAction = (environment: SettingsMenuEnvironment, stor
 
 export const registerSettingsMenu = (environment: SettingsMenuEnvironment, store: SettingsStore): void => {
     registerEditingToggle(environment, store);
+    registerToolbarToggle(environment, store);
     registerTabWidthAction(environment, store);
     registerShortcutAction(environment, store, "bold", "Set Bold Shortcut");
     registerShortcutAction(environment, store, "italic", "Set Italic Shortcut");

@@ -292,6 +292,21 @@ describe("Settings", () => {
         expect(storage.writeValue).toHaveBeenCalledOnce();
     });
 
+    test("notifies live subscribers only while subscribed", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+        const listener = vi.fn();
+        const unsubscribe = store.subscribeSettings(listener);
+
+        const updated = store.updateSettings({ isToolbarEnabled: false });
+        expect(listener).toHaveBeenCalledOnce();
+        expect(listener).toHaveBeenCalledWith(updated);
+
+        unsubscribe();
+        store.updateSettings({ isToolbarEnabled: true });
+        expect(listener).toHaveBeenCalledOnce();
+    });
+
     test("normalizes one valid editor selector per line while preserving selector-list commas", () => {
         expect(
             normalizeEditorSelectors([

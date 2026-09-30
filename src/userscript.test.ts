@@ -48,7 +48,7 @@ describe("Userscript", () => {
         const textArea = document.createElement("textarea");
         document.body.append(textArea);
 
-        expect(commands).toHaveLength(7);
+        expect(commands).toHaveLength(8);
         expect(writeValue).toHaveBeenCalledWith(SETTINGS_STORAGE_KEY, createDefaultSettings());
 
         textArea.value = "a";
@@ -66,6 +66,13 @@ describe("Userscript", () => {
         commands.get("Toggle Markdown Editing")?.();
         expect(dispatchKey(textArea, "(").defaultPrevented).toBe(true);
         expect(textArea.value).toBe("(value)");
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).not.toBeNull();
+
+        commands.get("Toggle Formatting Toolbar")?.();
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull();
+        commands.get("Toggle Formatting Toolbar")?.();
+        textArea.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).not.toBeNull();
     });
 
     test("keeps the runtime active without registering menus in child frames", () => {

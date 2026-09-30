@@ -21,6 +21,7 @@ export interface RoutedEditor {
 }
 
 export type EditorEventResolver = (event: Event) => RoutedEditor | null;
+export type EditorKeydownObserver = (event: KeyboardEvent) => void;
 
 const SELECTION_WRAP_CHARACTERS: Readonly<Record<string, PairedCharacterDefinition>> = {
     _: { leading: "_", trailing: "_", isSelectionRequired: true },
@@ -118,8 +119,12 @@ const dispatchChangeEventIfRequired = (editor: RoutedEditor, valueBeforeEdit: st
     }
 };
 
-export const attachEditorEventRouter = (resolveEditor: EditorEventResolver): (() => void) => {
+export const attachEditorEventRouter = (
+    resolveEditor: EditorEventResolver,
+    observeKeydown: EditorKeydownObserver = () => undefined
+): (() => void) => {
     const handleKeydown = (event: KeyboardEvent): void => {
+        observeKeydown(event);
         if (event.defaultPrevented || event.isComposing) {
             return;
         }

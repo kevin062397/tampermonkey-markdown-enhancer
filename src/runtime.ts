@@ -5,8 +5,9 @@ import {
     type EditorCommand,
     type EditorCommandRegistry
 } from "./command-registry";
-import { getActiveEditorAdapters, resolveEditorFromEvent, type EditorAdapter } from "./editor-adapter";
+import { getActiveEditorAdapters, getEventPath, resolveEditorFromPath, type EditorAdapter } from "./editor-adapter";
 import { attachEditorEventRouter, type RoutedEditor } from "./event-router";
+import { attachFormattingToolbar, type FormattingToolbarEditor } from "./formatting-toolbar";
 import { createDefaultSettings, type MarkdownEnhancerSettings, type SettingsSource } from "./settings";
 import { createDefaultEditorAdapters } from "./targeting";
 
@@ -56,13 +57,16 @@ export const initializeMarkdownEnhancer = (
     }
 
     const getPageUrl = (): URL => (typeof pageUrlSource === "function" ? pageUrlSource() : pageUrlSource);
-    const resolveEditor = (event: Event): RoutedEditor | null => {
+    const resolveConfiguredEditor = (
+        path: readonly EventTarget[],
+        shouldRequireToolbar: boolean
+    ): (RoutedEditor & FormattingToolbarEditor) | null => {
         const settings = settingsSource.getSettings();
-        if (!settings.isEnabled) {
+        if (!settings.isEnabled || (shouldRequireToolbar && !settings.isToolbarEnabled)) {
             return null;
         }
         const activeAdapters = getActiveEditorAdapters(configuredAdapters, getPageUrl());
-        const editor = resolveEditorFromEvent(event, activeAdapters);
+        const editor = resolveEditorFromPath(path, activeAdapters);
         if (!editor) {
             return null;
         }
@@ -73,9 +77,39 @@ export const initializeMarkdownEnhancer = (
         return {
             textArea: editor.textArea,
             commandRegistry,
+            toolbarPlacement: editor.adapter.toolbarPlacement ?? "after-editor",
             shouldDispatchChangeEventAfterEdit: editor.adapter.shouldDispatchChangeEventAfterEdit ?? false,
             tabWidth: settings.tabWidth
         };
     };
-    return attachEditorEventRouter(resolveEditor);
+    const resolveRoutedEditor = (event: Event): RoutedEditor | null =>
+        resolveConfiguredEditor(getEventPath(event), false);
+    const resolveToolbarEditor = (event: Event): FormattingToolbarEditor | null =>
+        resolveConfiguredEditor(getEventPath(event), true);
+    const resolveToolbarEditorFromTextArea = (textArea: HTMLTextAreaElement): FormattingToolbarEditor | null =>
+        resolveConfiguredEditor([textArea], true);
+
+    const toolbarKeydownListeners = new Set<(event: KeyboardEvent) => void>();
+    const notifyToolbarKeydown = (event: KeyboardEvent): void => {
+        for (const listener of toolbarKeydownListeners) {
+            listener(event);
+        }
+    };
+    const disposeEventRouter = attachEditorEventRouter(resolveRoutedEditor, notifyToolbarKeydown);
+    const disposeFormattingToolbar = attachFormattingToolbar({
+        resolveEditor: resolveToolbarEditor,
+        resolveEditorFromTextArea: resolveToolbarEditorFromTextArea,
+        subscribeKeydown: (listener) => {
+            toolbarKeydownListeners.add(listener);
+            return () => toolbarKeydownListeners.delete(listener);
+        },
+        subscribeSettings: settingsSource.subscribeSettings
+            ? (listener) => settingsSource.subscribeSettings?.(listener) ?? (() => undefined)
+            : undefined
+    });
+
+    return () => {
+        disposeFormattingToolbar();
+        disposeEventRouter();
+    };
 };

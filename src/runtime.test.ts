@@ -2,7 +2,14 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { EditorCommand } from "./command-registry";
 import type { EditorAdapter } from "./editor-adapter";
 import { initializeMarkdownEnhancer } from "./runtime";
-import { createDefaultSettings, type MarkdownEnhancerSettings, type SettingsSource } from "./settings";
+import {
+    createDefaultSettings,
+    createSettingsStore,
+    SETTINGS_STORAGE_KEY,
+    type MarkdownEnhancerSettings,
+    type SettingsSource,
+    type SettingsStorage
+} from "./settings";
 
 let disposeEnhancer: (() => void) | undefined;
 
@@ -397,6 +404,240 @@ describe("Markdown enhancer runtime", () => {
         textArea.value = "value";
         textArea.setSelectionRange(0, 5);
         expect(dispatchKey(textArea, "(").defaultPrevented).toBe(false);
+    });
+
+    test("integrates toolbar placement with current settings and snapshotted adapter commands", () => {
+        let settings: MarkdownEnhancerSettings = { ...createDefaultSettings(), isToolbarEnabled: false };
+        const settingsSource: SettingsSource = { getSettings: () => settings };
+        const executeOriginal = vi.fn(({ textArea }: { textArea: HTMLTextAreaElement }) => {
+            textArea.setRangeText("custom", 0, textArea.value.length, "select");
+            return true;
+        });
+        const executeReplacement = vi.fn(() => true);
+        const sourceCommand = {
+            id: "adapter.custom",
+            label: "Adapter custom",
+            isAvailable: () => true,
+            execute: executeOriginal
+        };
+        const adapter: EditorAdapter = {
+            ...createAdapter(
+                "toolbar-adapter",
+                () => true,
+                (element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement,
+                [sourceCommand]
+            ),
+            toolbarPlacement: "before-editor",
+            shouldDispatchChangeEventAfterEdit: true
+        };
+        disposeEnhancer = initializeMarkdownEnhancer(
+            [],
+            [adapter],
+            new URL("https://example.test/editor"),
+            settingsSource
+        );
+        sourceCommand.label = "Changed";
+        sourceCommand.execute = executeReplacement;
+        const textArea = createTextArea();
+        textArea.value = "value";
+        textArea.setSelectionRange(0, 5);
+        textArea.focus();
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull();
+
+        settings = { ...settings, isToolbarEnabled: true };
+        textArea.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        const toolbar = document.querySelector<HTMLElement>("[data-tampermonkey-markdown-enhancer-formatting-toolbar]");
+        if (!toolbar) {
+            throw new Error("Expected runtime toolbar");
+        }
+        expect(textArea.previousSibling).toBe(toolbar);
+        const customButton = toolbar.querySelector<HTMLButtonElement>('button[data-command-id="adapter.custom"]');
+        expect(customButton?.textContent).toBe("Adapter custom");
+        const changeEvent = vi.fn();
+        textArea.addEventListener("change", changeEvent);
+        customButton?.click();
+        expect(executeOriginal).toHaveBeenCalledOnce();
+        expect(executeReplacement).not.toHaveBeenCalled();
+        expect(textArea.value).toBe("custom");
+        expect(changeEvent).toHaveBeenCalledOnce();
+
+        settings = { ...settings, isEnabled: false };
+        textArea.dispatchEvent(new Event("input", { bubbles: true }));
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull();
+    });
+
+    test("uses current shared-storage settings for toolbar pointer and click execution", () => {
+        let storedSettings: unknown = createDefaultSettings();
+        const storage: SettingsStorage = {
+            readValue: (key) => (key === SETTINGS_STORAGE_KEY ? storedSettings : undefined),
+            writeValue: (key, value) => {
+                if (key === SETTINGS_STORAGE_KEY) {
+                    storedSettings = value;
+                }
+            }
+        };
+        const runtimeStore = createSettingsStore(storage);
+        const externalStore = createSettingsStore(storage);
+        const adapter = createAdapter(
+            "shared-settings",
+            () => true,
+            (element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement
+        );
+        const textArea = createTextArea();
+        textArea.value = "item";
+        textArea.setSelectionRange(0, textArea.value.length);
+        disposeEnhancer = initializeMarkdownEnhancer(
+            [],
+            [adapter],
+            new URL("https://example.test/editor"),
+            runtimeStore
+        );
+        textArea.focus();
+        const toolbar = document.querySelector<HTMLElement>("[data-tampermonkey-markdown-enhancer-formatting-toolbar]");
+        const bulletButton = toolbar?.querySelector<HTMLButtonElement>('button[data-command-id="line.bulletList"]');
+        if (!toolbar || !bulletButton) {
+            throw new Error("Expected runtime toolbar bullet command");
+        }
+
+        externalStore.updateSettings({ bulletStyle: "*" });
+        bulletButton.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        bulletButton.click();
+        expect(textArea.value).toBe("* item");
+
+        externalStore.updateSettings({ bulletStyle: "+" });
+        textArea.value = "item";
+        textArea.setSelectionRange(0, textArea.value.length);
+        bulletButton.click();
+        expect(textArea.value).toBe("+ item");
+
+        externalStore.updateSettings({ isToolbarEnabled: false });
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+        const boldButton = toolbar.querySelector<HTMLButtonElement>('button[data-command-id="format.bold"]');
+        boldButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        boldButton?.click();
+        expect(textArea.value).toBe("value");
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull();
+    });
+
+    test("rerenders adapter-scoped commands for the same editor without replacing the container", () => {
+        let currentUrl = new URL("https://example.test/first");
+        const executeFirst = vi.fn(() => true);
+        const executeSecond = vi.fn(() => true);
+        const createAdapterCommand = (id: string, label: string, execute: () => boolean): EditorCommand => ({
+            id,
+            label,
+            isAvailable: () => true,
+            execute
+        });
+        const textArea = createTextArea();
+        const firstAdapter: EditorAdapter = {
+            ...createAdapter(
+                "first-toolbar",
+                (url) => url.pathname === "/first",
+                (element): element is HTMLTextAreaElement => element === textArea,
+                [createAdapterCommand("adapter.first", "First action", executeFirst)]
+            ),
+            toolbarPlacement: "before-editor"
+        };
+        const secondAdapter: EditorAdapter = {
+            ...createAdapter(
+                "second-toolbar",
+                (url) => url.pathname === "/second",
+                (element): element is HTMLTextAreaElement => element === textArea,
+                [createAdapterCommand("adapter.second", "Second action", executeSecond)]
+            ),
+            toolbarPlacement: "after-editor"
+        };
+        disposeEnhancer = initializeMarkdownEnhancer([], [firstAdapter, secondAdapter], () => currentUrl);
+        textArea.focus();
+        const toolbar = document.querySelector<HTMLElement>("[data-tampermonkey-markdown-enhancer-formatting-toolbar]");
+        if (!toolbar) {
+            throw new Error("Expected runtime toolbar");
+        }
+        expect(textArea.previousSibling).toBe(toolbar);
+        expect(toolbar.querySelector('button[data-command-id="adapter.first"]')).not.toBeNull();
+
+        currentUrl = new URL("https://example.test/second");
+        textArea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+        expect(document.querySelector<HTMLElement>("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBe(
+            toolbar
+        );
+        expect(textArea.nextSibling).toBe(toolbar);
+        expect(toolbar.querySelector('button[data-command-id="adapter.first"]')).toBeNull();
+        const secondButton = toolbar.querySelector<HTMLButtonElement>('button[data-command-id="adapter.second"]');
+        expect(secondButton?.textContent).toBe("Second action");
+        secondButton?.click();
+        expect(executeFirst).not.toHaveBeenCalled();
+        expect(executeSecond).toHaveBeenCalledOnce();
+    });
+
+    test("relocates the same container when adapter placement changes without command presentation changes", () => {
+        let currentUrl = new URL("https://example.test/before");
+        const executeBefore = vi.fn(() => true);
+        const executeAfter = vi.fn(() => true);
+        const createSharedCommand = (execute: () => boolean): EditorCommand => ({
+            id: "adapter.shared",
+            label: "Shared action",
+            isAvailable: () => true,
+            execute
+        });
+        const textArea = createTextArea();
+        const createPlacementAdapter = (
+            path: string,
+            toolbarPlacement: "before-editor" | "after-editor",
+            execute: () => boolean
+        ): EditorAdapter => ({
+            ...createAdapter(
+                `placement-${path}`,
+                (url) => url.pathname === `/${path}`,
+                (element): element is HTMLTextAreaElement => element === textArea,
+                [createSharedCommand(execute)]
+            ),
+            toolbarPlacement
+        });
+        disposeEnhancer = initializeMarkdownEnhancer(
+            [],
+            [
+                createPlacementAdapter("before", "before-editor", executeBefore),
+                createPlacementAdapter("after", "after-editor", executeAfter)
+            ],
+            () => currentUrl
+        );
+        textArea.focus();
+        const toolbar = document.querySelector<HTMLElement>("[data-tampermonkey-markdown-enhancer-formatting-toolbar]");
+        const sharedButton = toolbar?.querySelector<HTMLButtonElement>('button[data-command-id="adapter.shared"]');
+        if (!toolbar || !sharedButton) {
+            throw new Error("Expected shared adapter command");
+        }
+        expect(textArea.previousSibling).toBe(toolbar);
+
+        currentUrl = new URL("https://example.test/after");
+        textArea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+        expect(textArea.nextSibling).toBe(toolbar);
+        expect(toolbar.querySelector('button[data-command-id="adapter.shared"]')).toBe(sharedButton);
+        sharedButton.click();
+        expect(executeBefore).not.toHaveBeenCalled();
+        expect(executeAfter).toHaveBeenCalledOnce();
+    });
+
+    test("removes runtime toolbar UI when disposed", () => {
+        const adapter = createAdapter(
+            "toolbar-disposable",
+            () => true,
+            (element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement
+        );
+        const textArea = createTextArea();
+        textArea.value = "value";
+        textArea.setSelectionRange(0, 5);
+        const dispose = initializeMarkdownEnhancer([], [adapter], new URL("https://example.test/editor"));
+        textArea.focus();
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).not.toBeNull();
+
+        dispose();
+
+        expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull();
+        expect(dispatchKey(textArea, "F10", { altKey: true }).defaultPrevented).toBe(false);
     });
 
     test("disposes delegated keyboard and paste listeners", () => {

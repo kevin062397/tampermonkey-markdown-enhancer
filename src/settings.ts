@@ -37,12 +37,14 @@ export interface SettingsStorage {
 
 export interface SettingsSource {
     readonly getSettings: () => MarkdownEnhancerSettings;
+    readonly subscribeSettings?: (listener: (settings: MarkdownEnhancerSettings) => void) => () => void;
 }
 
 export type SettingsUpdate =
     Partial<MarkdownEnhancerSettings> | ((settings: MarkdownEnhancerSettings) => Partial<MarkdownEnhancerSettings>);
 
 export interface SettingsStore extends SettingsSource {
+    readonly subscribeSettings: (listener: (settings: MarkdownEnhancerSettings) => void) => () => void;
     readonly updateSettings: (update: SettingsUpdate) => MarkdownEnhancerSettings;
 }
 
@@ -302,23 +304,35 @@ const hasUnsupportedStoredSchemaVersion = (value: unknown): boolean =>
 
 export const createSettingsStore = (storage: SettingsStorage): SettingsStore => {
     const rawSettings = storage.readValue(SETTINGS_STORAGE_KEY);
+    const listeners = new Set<(settings: MarkdownEnhancerSettings) => void>();
     let latestRawValue = rawSettings;
     let currentSettings = normalizeSettings(rawSettings);
     if (!hasUnsupportedStoredSchemaVersion(rawSettings) && !areValuesEqual(rawSettings, currentSettings)) {
         storage.writeValue(SETTINGS_STORAGE_KEY, currentSettings);
     }
 
+    const notifySettings = (): void => {
+        for (const listener of listeners) {
+            listener(currentSettings);
+        }
+    };
+
     const getLatestSettings = (): MarkdownEnhancerSettings => {
         latestRawValue = storage.readValue(SETTINGS_STORAGE_KEY);
         const latestSettings = normalizeSettings(latestRawValue);
         if (!areValuesEqual(currentSettings, latestSettings)) {
             currentSettings = latestSettings;
+            notifySettings();
         }
         return currentSettings;
     };
 
     return {
         getSettings: getLatestSettings,
+        subscribeSettings: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
         updateSettings: (update) => {
             const latestSettings = getLatestSettings();
             if (hasUnsupportedStoredSchemaVersion(latestRawValue)) {
@@ -333,6 +347,7 @@ export const createSettingsStore = (storage: SettingsStorage): SettingsStore => 
 
             currentSettings = nextSettings;
             storage.writeValue(SETTINGS_STORAGE_KEY, currentSettings);
+            notifySettings();
             return currentSettings;
         }
     };
