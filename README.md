@@ -32,13 +32,19 @@ Bold and italic toggles preserve boundary whitespace and correctly transition ex
 ### Markdown Lines and Paste
 
 - `Enter` continues bullet, numbered, task-list, blockquote, and indented lines. Numbered markers increment, task markers reset to unchecked, and pressing `Enter` on an empty prefixed line removes the prefix.
-- With no selection outside a recognized bullet, numbered, task-list, or blockquote line, `Tab` inserts spaces to the next four-column tab stop. The tab width is currently fixed at four spaces.
+- With no selection outside a recognized bullet, numbered, task-list, or blockquote line, `Tab` inserts spaces to the next configured tab stop. The default width is four spaces.
 - Pasting an `http`, `https`, `ftp`, or `mailto` URL over selected text creates an escaped Markdown link. Native paste behavior handles other clipboard content.
 - The delegated handler yields to IME composition and page handlers that consume keyboard or paste events first.
 
 ## Built-In Command Registry
 
 The runtime includes commands for bold, italic, strikethrough, inline code, fenced code blocks, links, headings 1–6, blockquotes, bullet lists, numbered lists, and task lists. Bold, italic, and link have direct keyboard shortcuts.
+
+## Settings
+
+The Tampermonkey menu provides seven live controls for Markdown editing, tab width, bold/italic/link shortcuts, the current hostname exclusion, and editor selector exclusions. On macOS, shortcut prompts use `Command` and accept `Command+B`, `Cmd+B`, or `mod+B`. On other platforms, prompts use `Control` and accept `Control+B`, `Ctrl+B`, or `mod+B`. Each prompt displays the current value and default; leaving it blank restores the default when that binding is available. The defaults are `Command`/`Control` + `B`, `I`, and `K` for bold, italic, and link. **Toggle Editor Exclusion Selector** accepts one CSS selector at a time: enter a new selector to add it or an existing selector to remove it. Commas remain available for CSS selector lists. Up to 32 unique, valid selectors of 256 characters each are retained.
+
+Settings are stored with the userscript. Editing, shortcut, and targeting changes apply to subsequent editor events without a page reload.
 
 ## Installation
 

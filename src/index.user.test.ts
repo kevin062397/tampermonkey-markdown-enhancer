@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { EditorCommand } from "./command-registry";
+import { isMacPlatform } from "./platform";
 
 const ASYMMETRIC_PAIR_CASES = [
     ["(", ")"],
@@ -47,8 +48,7 @@ const dispatchKey = (textArea: HTMLTextAreaElement, key: string, init: KeyboardE
 };
 
 const dispatchShortcut = (textArea: HTMLTextAreaElement, key: string): KeyboardEvent => {
-    const isApplePlatform = /Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    return dispatchKey(textArea, key, isApplePlatform ? { metaKey: true } : { ctrlKey: true });
+    return dispatchKey(textArea, key, isMacPlatform() ? { metaKey: true } : { ctrlKey: true });
 };
 
 const setUserAgent = (userAgent: string): void => {
@@ -70,11 +70,19 @@ beforeEach(() => {
     vi.resetModules();
     document.body.innerHTML = "";
     disposeEnhancer = undefined;
+    Object.defineProperties(globalThis, {
+        GM_getValue: { configurable: true, value: vi.fn(() => undefined) },
+        GM_setValue: { configurable: true, value: vi.fn() },
+        GM_registerMenuCommand: { configurable: true, value: vi.fn() }
+    });
 });
 
 afterEach(() => {
     disposeEnhancer?.();
     delete (document as unknown as { execCommand?: Document["execCommand"] }).execCommand;
+    delete (globalThis as { GM_getValue?: unknown }).GM_getValue;
+    delete (globalThis as { GM_setValue?: unknown }).GM_setValue;
+    delete (globalThis as { GM_registerMenuCommand?: unknown }).GM_registerMenuCommand;
     vi.restoreAllMocks();
     document.body.innerHTML = "";
 });

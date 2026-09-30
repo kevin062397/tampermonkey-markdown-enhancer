@@ -1,6 +1,8 @@
 import type { EditOperation, EditorState } from "./editor-state";
 import { getSelectedLineRange } from "./line-ranges";
 
+export type BulletStyle = "-" | "*" | "+";
+
 export type LinePrefixKind =
     | "heading1"
     | "heading2"
@@ -34,7 +36,9 @@ const createHeadingDefinition = (level: number): LinePrefixDefinition => ({
     competingPattern: /^#{1,6} /
 });
 
-const LINE_PREFIX_DEFINITIONS: Readonly<Record<LinePrefixKind, LinePrefixDefinition>> = {
+const createLinePrefixDefinitions = (
+    bulletStyle: BulletStyle
+): Readonly<Record<LinePrefixKind, LinePrefixDefinition>> => ({
     heading1: createHeadingDefinition(1),
     heading2: createHeadingDefinition(2),
     heading3: createHeadingDefinition(3),
@@ -43,7 +47,7 @@ const LINE_PREFIX_DEFINITIONS: Readonly<Record<LinePrefixKind, LinePrefixDefinit
     heading6: createHeadingDefinition(6),
     blockquote: { prefix: "> ", targetPattern: /^> /, competingPattern: /^> / },
     bulletList: {
-        prefix: "- ",
+        prefix: `${bulletStyle} `,
         targetPattern: /^[-+*] (?!\[[ xX]\] )/,
         competingPattern: LIST_PREFIX_PATTERN
     },
@@ -53,11 +57,11 @@ const LINE_PREFIX_DEFINITIONS: Readonly<Record<LinePrefixKind, LinePrefixDefinit
         competingPattern: LIST_PREFIX_PATTERN
     },
     taskList: {
-        prefix: "- [ ] ",
+        prefix: `${bulletStyle} [ ] `,
         targetPattern: /^[-+*] \[[ xX]\] /,
         competingPattern: LIST_PREFIX_PATTERN
     }
-};
+});
 
 const getIndentationLength = (line: string): number => line.match(/^[ \t]*/)?.[0].length ?? 0;
 
@@ -109,8 +113,12 @@ const mapPositionAfterLinePrefixChanges = (position: number, changes: readonly L
     return position + accumulatedDelta;
 };
 
-export const toggleLinePrefix = (state: EditorState, kind: LinePrefixKind): EditOperation | null => {
-    const definition = LINE_PREFIX_DEFINITIONS[kind];
+export const toggleLinePrefix = (
+    state: EditorState,
+    kind: LinePrefixKind,
+    bulletStyle: BulletStyle = "-"
+): EditOperation | null => {
+    const definition = createLinePrefixDefinitions(bulletStyle)[kind];
     const range = getSelectedLineRange(state);
     const nonBlankLines = range.lines.filter((line) => line.trim() !== "");
     const isRemovingPrefixes =

@@ -1,3 +1,3 @@
-import { initializeMarkdownEnhancer } from "./runtime";
+import { initializeUserscript } from "./userscript";
 
-export const disposeMarkdownEnhancer = initializeMarkdownEnhancer();
+export const disposeMarkdownEnhancer = initializeUserscript();

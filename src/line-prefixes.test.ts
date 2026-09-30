@@ -21,8 +21,8 @@ const applyOperation = (state: EditorState, operation: EditOperation | null): Ed
     };
 };
 
-const executeToggle = (state: EditorState, kind: LinePrefixKind): EditorState =>
-    applyOperation(state, toggleLinePrefix(state, kind));
+const executeToggle = (state: EditorState, kind: LinePrefixKind, bulletStyle: "-" | "*" | "+" = "-"): EditorState =>
+    applyOperation(state, toggleLinePrefix(state, kind, bulletStyle));
 
 describe("Line prefixes", () => {
     test("toggles every heading level without separate implementations", () => {
@@ -87,6 +87,18 @@ describe("Line prefixes", () => {
         expect(result.value).toBe("> one\ntwo");
         expect([result.selectionStart, result.selectionEnd]).toEqual([2, 6]);
         expect(result.selectionDirection).toBe("backward");
+    });
+
+    test("uses configured markers for inserted bullets and tasks", () => {
+        expect(executeToggle(createEditorState("one\ntwo"), "bulletList", "*").value).toBe("* one\n* two");
+        expect(executeToggle(createEditorState("one\ntwo"), "taskList", "+").value).toBe("+ [ ] one\n+ [ ] two");
+    });
+
+    test("preserves supported existing markers and removes mixed marker styles", () => {
+        const original = createEditorState("- one\nplain\n+ three");
+        const added = executeToggle(original, "bulletList", "*");
+        expect(added.value).toBe("- one\n* plain\n+ three");
+        expect(executeToggle(added, "bulletList", "*").value).toBe("one\nplain\nthree");
     });
 
     test("maps backward selections through different list-marker lengths", () => {

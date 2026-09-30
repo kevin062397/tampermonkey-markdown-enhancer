@@ -11,7 +11,7 @@ const userscript: MonkeyUserScript = {
     namespace: "https://github.com/kevin062397/TampermonkeyMarkdownEnhancer",
     version: "1.6.0",
     match: "*://*/*",
-    grant: "none",
+    grant: ["GM_getValue", "GM_registerMenuCommand", "GM_setValue"],
     icon,
     icon64
 };

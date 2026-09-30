@@ -11,11 +11,13 @@ import {
     wrapSelectionCommand
 } from "./commands";
 import { isClosingPairCharacter, PAIRED_CHARACTERS, type PairedCharacterDefinition } from "./paired-characters";
+import { isMacPlatform } from "./platform";
 
 export interface RoutedEditor {
     readonly textArea: HTMLTextAreaElement;
     readonly commandRegistry: EditorCommandRegistry;
     readonly shouldDispatchChangeEventAfterEdit: boolean;
+    readonly tabWidth: number;
 }
 
 export type EditorEventResolver = (event: Event) => RoutedEditor | null;
@@ -31,21 +33,18 @@ const WRAP_CHARACTERS: Readonly<Record<string, PairedCharacterDefinition>> = {
     ...SELECTION_WRAP_CHARACTERS
 };
 
-const TAB_SIZE = 4;
-
-const isApplePlatform = (): boolean => /Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
 const isPrimaryModifierPressed = (event: KeyboardEvent): boolean => {
     if (event.altKey || event.shiftKey) {
         return false;
     }
-    return isApplePlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    return isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 };
 
 const handleEditorKeydown = (
     event: KeyboardEvent,
     textArea: HTMLTextAreaElement,
-    commandRegistry: EditorCommandRegistry
+    commandRegistry: EditorCommandRegistry,
+    tabWidth: number
 ): void => {
     const isSelectionPresent = textArea.selectionStart !== textArea.selectionEnd;
     const isPrimaryModifierActive = isPrimaryModifierPressed(event);
@@ -91,15 +90,15 @@ const handleEditorKeydown = (
     if (event.key === "Tab" && !event.shiftKey && isEditingModifierAllowed) {
         event.preventDefault();
         if (isSelectionPresent) {
-            indentCommand(textArea, TAB_SIZE);
-        } else if (!indentMarkdownLineCommand(textArea, TAB_SIZE)) {
-            insertSpacesCommand(textArea, TAB_SIZE);
+            indentCommand(textArea, tabWidth);
+        } else if (!indentMarkdownLineCommand(textArea, tabWidth)) {
+            insertSpacesCommand(textArea, tabWidth);
         }
     }
 
     if (event.key === "Tab" && event.shiftKey && isEditingModifierAllowed) {
         event.preventDefault();
-        outdentCommand(textArea, TAB_SIZE);
+        outdentCommand(textArea, tabWidth);
     }
 };
 
@@ -127,7 +126,7 @@ export const attachEditorEventRouter = (resolveEditor: EditorEventResolver): (()
         const editor = resolveEditor(event);
         if (editor) {
             const valueBeforeEdit = editor.textArea.value;
-            handleEditorKeydown(event, editor.textArea, editor.commandRegistry);
+            handleEditorKeydown(event, editor.textArea, editor.commandRegistry, editor.tabWidth);
             dispatchChangeEventIfRequired(editor, valueBeforeEdit);
         }
     };

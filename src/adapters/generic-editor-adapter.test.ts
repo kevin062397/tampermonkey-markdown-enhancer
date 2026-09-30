@@ -23,6 +23,18 @@ describe("Generic editor adapter", () => {
         expect(resolveEditorFromPath([textArea, container], [adapter])?.textArea).toBe(textArea);
     });
 
+    test("honors editor exclusions", () => {
+        const isEditorExcluded = vi.fn((editor: HTMLTextAreaElement) => editor.matches(".excluded"));
+        const adapter = createGenericEditorAdapter({ isEditorExcluded });
+        const included = document.createElement("textarea");
+        const excluded = document.createElement("textarea");
+        excluded.className = "excluded";
+
+        expect(resolveEditorFromPath([included], [adapter])?.textArea).toBe(included);
+        expect(resolveEditorFromPath([excluded], [adapter])).toBeNull();
+        expect(isEditorExcluded).toHaveBeenCalledTimes(2);
+    });
+
     test("honors page exclusions and ignores unsupported elements", () => {
         const isPageExcluded = vi.fn((url: URL) => url.hostname === "excluded.example");
         const adapter = createGenericEditorAdapter({ isPageExcluded });

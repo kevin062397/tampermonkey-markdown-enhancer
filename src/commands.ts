@@ -1,7 +1,7 @@
 import { toggleFencedCodeBlock, toggleInlineCode } from "./code-formatting";
 import { applyEditTransaction } from "./edit-transaction";
 import { readEditorState, type EditorTransform } from "./editor-state";
-import { toggleLinePrefix, type LinePrefixKind } from "./line-prefixes";
+import { toggleLinePrefix, type BulletStyle, type LinePrefixKind } from "./line-prefixes";
 import { continueMarkdownLine, indentMarkdownLine } from "./markdown-lines";
 import {
     createMarkdownLinkFromPaste,
@@ -42,8 +42,11 @@ export const toggleInlineCodeCommand = (textArea: HTMLTextAreaElement): boolean 
 export const toggleFencedCodeBlockCommand = (textArea: HTMLTextAreaElement): boolean =>
     executeTransform(textArea, toggleFencedCodeBlock);
 
-export const toggleLinePrefixCommand = (textArea: HTMLTextAreaElement, kind: LinePrefixKind): boolean =>
-    executeTransform(textArea, (state) => toggleLinePrefix(state, kind));
+export const toggleLinePrefixCommand = (
+    textArea: HTMLTextAreaElement,
+    kind: LinePrefixKind,
+    bulletStyle: BulletStyle = "-"
+): boolean => executeTransform(textArea, (state) => toggleLinePrefix(state, kind, bulletStyle));
 
 export const continueMarkdownLineCommand = (textArea: HTMLTextAreaElement): boolean =>
     executeTransform(textArea, continueMarkdownLine);

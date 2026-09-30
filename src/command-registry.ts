@@ -5,7 +5,8 @@ import {
     toggleLinePrefixCommand,
     toggleWrapCommand
 } from "./commands";
-import type { LinePrefixKind } from "./line-prefixes";
+import type { BulletStyle, LinePrefixKind } from "./line-prefixes";
+import { DEFAULT_SHORTCUTS, type ShortcutOverrides } from "./settings";
 
 export const EDITOR_COMMAND_IDS = {
     blockquote: "line.blockquote",
@@ -41,6 +42,11 @@ export interface EditorCommand {
     readonly shortcut?: CommandShortcut;
     readonly isAvailable: (context: EditorCommandContext) => boolean;
     readonly execute: (context: EditorCommandContext) => boolean;
+}
+
+export interface CommandRegistryOptions {
+    readonly bulletStyle?: BulletStyle;
+    readonly shortcutOverrides?: ShortcutOverrides;
 }
 
 export interface EditorCommandRegistry {
@@ -87,35 +93,42 @@ const createFormattingCommand = (
     execute: ({ textArea }) => toggleWrapCommand(textArea, wrap)
 });
 
-const createLinePrefixCommand = (id: string, label: string, kind: LinePrefixKind): EditorCommand => ({
+const createLinePrefixCommand = (
+    id: string,
+    label: string,
+    kind: LinePrefixKind,
+    bulletStyle: BulletStyle
+): EditorCommand => ({
     id,
     label,
     isAvailable: isLineFormattingAvailable,
-    execute: ({ textArea }) => toggleLinePrefixCommand(textArea, kind)
+    execute: ({ textArea }) => toggleLinePrefixCommand(textArea, kind, bulletStyle)
 });
 
-const createLinePrefixCommands = (): readonly EditorCommand[] => [
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading1, "Heading 1", "heading1"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading2, "Heading 2", "heading2"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading3, "Heading 3", "heading3"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading4, "Heading 4", "heading4"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading5, "Heading 5", "heading5"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading6, "Heading 6", "heading6"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.blockquote, "Blockquote", "blockquote"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.bulletList, "Bullet list", "bulletList"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.numberedList, "Numbered list", "numberedList"),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.taskList, "Task list", "taskList")
+const createLinePrefixCommands = (bulletStyle: BulletStyle): readonly EditorCommand[] => [
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading1, "Heading 1", "heading1", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading2, "Heading 2", "heading2", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading3, "Heading 3", "heading3", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading4, "Heading 4", "heading4", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading5, "Heading 5", "heading5", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading6, "Heading 6", "heading6", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.blockquote, "Blockquote", "blockquote", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.bulletList, "Bullet list", "bulletList", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.numberedList, "Numbered list", "numberedList", bulletStyle),
+    createLinePrefixCommand(EDITOR_COMMAND_IDS.taskList, "Task list", "taskList", bulletStyle)
 ];
 
-const createCoreCommands = (): readonly EditorCommand[] => [
-    createFormattingCommand(EDITOR_COMMAND_IDS.bold, "Bold", "**", {
-        key: "b",
-        isPrimaryModifierRequired: true
-    }),
-    createFormattingCommand(EDITOR_COMMAND_IDS.italic, "Italic", "*", {
-        key: "i",
-        isPrimaryModifierRequired: true
-    }),
+const createCoreCommands = (
+    bulletStyle: BulletStyle,
+    shortcutOverrides: ShortcutOverrides
+): readonly EditorCommand[] => [
+    createFormattingCommand(EDITOR_COMMAND_IDS.bold, "Bold", "**", shortcutOverrides.bold ?? DEFAULT_SHORTCUTS.bold),
+    createFormattingCommand(
+        EDITOR_COMMAND_IDS.italic,
+        "Italic",
+        "*",
+        shortcutOverrides.italic ?? DEFAULT_SHORTCUTS.italic
+    ),
     createFormattingCommand(EDITOR_COMMAND_IDS.strikethrough, "Strikethrough", "~~"),
     {
         id: EDITOR_COMMAND_IDS.inlineCode,
@@ -132,15 +145,47 @@ const createCoreCommands = (): readonly EditorCommand[] => [
     {
         id: EDITOR_COMMAND_IDS.link,
         label: "Link",
-        shortcut: { key: "k", isPrimaryModifierRequired: true },
+        shortcut: shortcutOverrides.link ?? DEFAULT_SHORTCUTS.link,
         isAvailable: isFormattingAvailable,
         execute: ({ textArea }) => insertMarkdownLinkCommand(textArea)
     },
-    ...createLinePrefixCommands()
+    ...createLinePrefixCommands(bulletStyle)
 ];
 
-export const createCommandRegistry = (additionalCommands: readonly EditorCommand[] = []): EditorCommandRegistry => {
-    const commands = [...additionalCommands, ...createCoreCommands()];
+export const createCommandSnapshot = (command: EditorCommand): EditorCommand => {
+    const id = command.id;
+    const label = command.label;
+    const shortcut = command.shortcut;
+    const isAvailable = command.isAvailable;
+    const execute = command.execute;
+    return Object.freeze({
+        id,
+        label,
+        shortcut: shortcut
+            ? Object.freeze({
+                  key: shortcut.key,
+                  isPrimaryModifierRequired: shortcut.isPrimaryModifierRequired
+              })
+            : undefined,
+        isAvailable: isAvailable.bind(command),
+        execute: execute.bind(command)
+    });
+};
+
+export const createCommandSnapshots = (commands: readonly EditorCommand[]): readonly EditorCommand[] => {
+    const commandInputs = Array.from(commands);
+    return Object.freeze(commandInputs.map(createCommandSnapshot));
+};
+
+export const createCommandRegistry = (
+    additionalCommands: readonly EditorCommand[] = [],
+    options: CommandRegistryOptions = {}
+): EditorCommandRegistry => {
+    const commandInputs = [
+        ...Array.from(additionalCommands),
+        ...createCoreCommands(options.bulletStyle ?? "-", options.shortcutOverrides ?? {})
+    ];
+    const commands = createCommandSnapshots(commandInputs);
     const commandsById = new Map<string, EditorCommand>();
     for (const command of commands) {
         if (commandsById.has(command.id)) {

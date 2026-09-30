@@ -3,7 +3,7 @@
     "expectedMetadata": {
         "author": ["Haoyuan Kevin Xia"],
         "description": ["Enhance Markdown editing experience."],
-        "grant": ["none"],
+        "grant": ["GM_getValue", "GM_registerMenuCommand", "GM_setValue"],
         "match": ["*://*/*"],
         "name": ["Markdown Enhancer"],
         "namespace": ["https://github.com/kevin062397/TampermonkeyMarkdownEnhancer"],
@@ -11,6 +11,9 @@
     },
     "requiredMetadata": ["icon", "icon64"],
     "runtimeMarkers": [
+        "initializeUserscript",
+        "createSettingsStore",
+        "registerSettingsMenu",
         "initializeMarkdownEnhancer",
         "createCommandRegistry",
         "deleteEmptyPair",

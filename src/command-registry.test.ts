@@ -238,6 +238,33 @@ describe("Command registry", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 2]);
     });
 
+    test("applies shortcut overrides and configured bullet styles", () => {
+        const registry = createCommandRegistry([], {
+            bulletStyle: "+",
+            shortcutOverrides: {
+                bold: { key: "x", isPrimaryModifierRequired: true },
+                italic: { key: "j", isPrimaryModifierRequired: true },
+                link: { key: "l", isPrimaryModifierRequired: true }
+            }
+        });
+        const textArea = createTextArea("value", 0, 5);
+        const context = { textArea };
+
+        expect(registry.findCommandByShortcut("b", true, context)).toBeUndefined();
+        expect(registry.findCommandByShortcut("x", true, context)?.id).toBe(EDITOR_COMMAND_IDS.bold);
+        expect(registry.findCommandByShortcut("j", true, context)?.id).toBe(EDITOR_COMMAND_IDS.italic);
+        expect(registry.findCommandByShortcut("l", true, context)?.id).toBe(EDITOR_COMMAND_IDS.link);
+
+        textArea.value = "item";
+        textArea.setSelectionRange(0, 4);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.bulletList, context)).toBe(true);
+        expect(textArea.value).toBe("+ item");
+        textArea.value = "task";
+        textArea.setSelectionRange(0, 4);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.taskList, context)).toBe(true);
+        expect(textArea.value).toBe("+ [ ] task");
+    });
+
     test("resolves shortcut conflicts with injected-command availability", () => {
         const isInjectedCommandAvailable = vi.fn(
             ({ textArea }: EditorCommandContext) => textArea.dataset.commandMode === "injected"
@@ -256,7 +283,7 @@ describe("Command registry", () => {
 
         expect(registry.findCommandByShortcut("b", true, context)?.id).toBe(EDITOR_COMMAND_IDS.bold);
         textArea.dataset.commandMode = "injected";
-        expect(registry.findCommandByShortcut("b", true, context)).toBe(injectedCommand);
+        expect(registry.findCommandByShortcut("b", true, context)?.id).toBe(injectedCommand.id);
     });
 
     test("falls back when an injected shortcut command declines execution", () => {
@@ -277,6 +304,101 @@ describe("Command registry", () => {
         expect(textArea.value).toBe("**value**");
     });
 
+    test("copies injected and override shortcut objects", () => {
+        const injectedShortcut = { key: "e", isPrimaryModifierRequired: true };
+        const boldOverride = { key: "x", isPrimaryModifierRequired: true as const };
+        const injectedCommand: EditorCommand = {
+            id: "custom.example",
+            label: "Example",
+            shortcut: injectedShortcut,
+            isAvailable: () => true,
+            execute: () => true
+        };
+        const registry = createCommandRegistry([injectedCommand], {
+            shortcutOverrides: { bold: boldOverride }
+        });
+        const context: EditorCommandContext = { textArea: createTextArea("value", 0, 5) };
+
+        expect(registry.getCommand(injectedCommand.id)).not.toBe(injectedCommand);
+        expect(registry.getCommand(injectedCommand.id)?.shortcut).not.toBe(injectedShortcut);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.bold)?.shortcut).not.toBe(boldOverride);
+
+        injectedShortcut.key = "q";
+        boldOverride.key = "z";
+        expect(registry.findCommandByShortcut("e", true, context)?.id).toBe(injectedCommand.id);
+        expect(registry.findCommandByShortcut("q", true, context)).toBeUndefined();
+        expect(registry.findCommandByShortcut("x", true, context)?.id).toBe(EDITOR_COMMAND_IDS.bold);
+        expect(registry.findCommandByShortcut("z", true, context)).toBeUndefined();
+    });
+
+    test("freezes command snapshots and captures source values only once", () => {
+        let shortcutReads = 0;
+        const sourceCommand = {
+            id: "custom.snapshot",
+            label: "Snapshot",
+            get shortcut() {
+                shortcutReads += 1;
+                return { key: shortcutReads === 1 ? "e" : "q", isPrimaryModifierRequired: false };
+            },
+            isAvailable: () => true,
+            execute: () => true
+        };
+        const registry = createCommandRegistry([sourceCommand]);
+        const commands = registry.listCommands();
+        const command = registry.getCommand("custom.snapshot");
+        if (!command?.shortcut) {
+            throw new Error("Expected snapshotted command shortcut");
+        }
+
+        expect(shortcutReads).toBe(1);
+        expect(Object.isFrozen(commands)).toBe(true);
+        expect(Object.isFrozen(command)).toBe(true);
+        expect(Object.isFrozen(command.shortcut)).toBe(true);
+        expect(() => (commands as EditorCommand[]).push(sourceCommand)).toThrow(TypeError);
+        expect(() => ((command as { id: string }).id = "custom.changed")).toThrow(TypeError);
+        expect(() => ((command.shortcut as { key: string }).key = "q")).toThrow(TypeError);
+
+        sourceCommand.id = "custom.changed";
+        sourceCommand.label = "Changed";
+        sourceCommand.isAvailable = () => false;
+        sourceCommand.execute = () => false;
+        expect(registry.getCommand("custom.snapshot")?.label).toBe("Snapshot");
+        expect(registry.getCommand("custom.changed")).toBeUndefined();
+        expect(registry.findCommandByShortcut("e", false, { textArea: createTextArea("", 0, 0) })?.id).toBe(
+            "custom.snapshot"
+        );
+        expect(shortcutReads).toBe(1);
+    });
+
+    test("binds prototype command methods to their original class instance", () => {
+        class ClassCommand implements EditorCommand {
+            readonly id = "custom.class";
+            readonly label = "Class command";
+            readonly shortcut = { key: "c", isPrimaryModifierRequired: false };
+            isReady = true;
+            executeCount = 0;
+
+            isAvailable(): boolean {
+                return this.isReady;
+            }
+
+            execute(): boolean {
+                this.executeCount += 1;
+                return this.isReady;
+            }
+        }
+
+        const sourceCommand = new ClassCommand();
+        const registry = createCommandRegistry([sourceCommand]);
+        const context = { textArea: createTextArea("", 0, 0) };
+
+        expect(registry.executeCommand("custom.class", context)).toBe(true);
+        expect(sourceCommand.executeCount).toBe(1);
+        sourceCommand.isReady = false;
+        expect(registry.executeCommand("custom.class", context)).toBe(false);
+        expect(sourceCommand.executeCount).toBe(1);
+    });
+
     test("injects additional commands and rejects duplicate IDs", () => {
         const isInjectedCommandAvailable = vi.fn(() => true);
         const executeInjectedCommand = vi.fn(() => true);
@@ -290,7 +412,7 @@ describe("Command registry", () => {
         const registry = createCommandRegistry([injectedCommand]);
         const context: EditorCommandContext = { textArea: createTextArea("value", 0, 5) };
 
-        expect(registry.findCommandByShortcut("E", true, context)).toBe(injectedCommand);
+        expect(registry.findCommandByShortcut("E", true, context)?.id).toBe(injectedCommand.id);
         expect(registry.executeCommand(injectedCommand.id, context)).toBe(true);
         expect(isInjectedCommandAvailable).toHaveBeenCalledWith(context);
         expect(executeInjectedCommand).toHaveBeenCalledWith(context);
