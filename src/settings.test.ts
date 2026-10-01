@@ -45,7 +45,6 @@ describe("Settings", () => {
             version: 1,
             isEnabled: false,
             isToolbarEnabled: "yes",
-            isCommandPaletteEnabled: true,
             isPreviewEnabled: null,
             tabWidth: 17,
             bulletStyle: "•",
@@ -66,6 +65,40 @@ describe("Settings", () => {
             excludedHostnames: ["example.com"],
             excludedEditorSelectors: ["textarea.special"]
         });
+    });
+
+    test("rewrites stored version 1 settings to the canonical active shape", () => {
+        const storedSettings = {
+            version: 1,
+            isEnabled: false,
+            isToolbarEnabled: false,
+            isCommandPaletteEnabled: false,
+            isPreviewEnabled: false,
+            tabWidth: 8,
+            bulletStyle: "+",
+            shortcutOverrides: { bold: { key: "z", isPrimaryModifierRequired: true } },
+            excludedHostnames: [" Docs.Example ", "docs.example"],
+            excludedEditorSelectors: [" #public-editor ", "#public-editor"]
+        };
+        const storage = createStorage(storedSettings);
+        const store = createSettingsStore(storage);
+        const expectedSettings = {
+            version: 1,
+            isEnabled: false,
+            isToolbarEnabled: false,
+            isPreviewEnabled: false,
+            tabWidth: 8,
+            bulletStyle: "+",
+            shortcutOverrides: { bold: { key: "z", isPrimaryModifierRequired: true } },
+            excludedHostnames: ["docs.example"],
+            excludedEditorSelectors: ["#public-editor"]
+        };
+
+        expect(store.getSettings()).toEqual(expectedSettings);
+        expect(storage.writeValue).toHaveBeenCalledOnce();
+        expect(storage.writeValue).toHaveBeenCalledWith(SETTINGS_STORAGE_KEY, expectedSettings);
+        expect(storage.getStoredValue()).toEqual(expectedSettings);
+        expect(storage.getStoredValue()).not.toHaveProperty("isCommandPaletteEnabled");
     });
 
     test.each([
@@ -176,30 +209,31 @@ describe("Settings", () => {
         });
     });
 
-    test("migrates legacy settings and useful exclusions", () => {
-        expect(
-            normalizeSettings({
-                enabled: false,
-                toolbarEnabled: false,
-                commandPaletteEnabled: false,
-                previewEnabled: false,
-                tabSize: 8,
-                bulletCharacter: "+",
-                excludedHostnames: [" Docs.Example "],
-                excludedEditorSelectors: ["#legacy-editor"]
-            })
-        ).toEqual({
+    test("migrates active legacy settings and useful exclusions", () => {
+        const settings = normalizeSettings({
+            enabled: false,
+            toolbarEnabled: false,
+            commandPaletteEnabled: false,
+            previewEnabled: false,
+            tabSize: 8,
+            bulletCharacter: "+",
+            shortcutOverrides: { italic: { key: "j", isPrimaryModifierRequired: true } },
+            excludedHostnames: [" Docs.Example "],
+            excludedEditorSelectors: ["#legacy-editor"]
+        });
+
+        expect(settings).toEqual({
             version: 1,
             isEnabled: false,
             isToolbarEnabled: false,
-            isCommandPaletteEnabled: false,
             isPreviewEnabled: false,
             tabWidth: 8,
             bulletStyle: "+",
-            shortcutOverrides: {},
+            shortcutOverrides: { italic: { key: "j", isPrimaryModifierRequired: true } },
             excludedHostnames: ["docs.example"],
             excludedEditorSelectors: ["#legacy-editor"]
         });
+        expect(settings).not.toHaveProperty("commandPaletteEnabled");
     });
 
     test("uses defaults in memory without overwriting unsupported stored schemas", () => {
@@ -213,7 +247,13 @@ describe("Settings", () => {
     });
 
     test("keeps future schemas read-only when an update is requested", () => {
-        const futurePayload = { version: 2, isEnabled: false, futureValue: { mode: "new" } };
+        const futurePayload = {
+            version: 2,
+            isEnabled: false,
+            isCommandPaletteEnabled: false,
+            futureValue: { mode: "new" }
+        };
+        const serializedFuturePayload = JSON.stringify(futurePayload);
         const storage = createStorage(futurePayload);
         const store = createSettingsStore(storage);
         const createChanges = vi.fn(() => ({ tabWidth: 8 }));
@@ -221,6 +261,7 @@ describe("Settings", () => {
         expect(store.updateSettings(createChanges)).toEqual(createDefaultSettings());
         expect(createChanges).not.toHaveBeenCalled();
         expect(storage.getStoredValue()).toBe(futurePayload);
+        expect(JSON.stringify(storage.getStoredValue())).toBe(serializedFuturePayload);
         expect(storage.writeValue).not.toHaveBeenCalled();
     });
 
