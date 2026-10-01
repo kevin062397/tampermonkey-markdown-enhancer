@@ -21,7 +21,6 @@ export interface MarkdownEnhancerSettings {
     readonly version: 1;
     readonly isEnabled: boolean;
     readonly isToolbarEnabled: boolean;
-    readonly isPreviewEnabled: boolean;
     readonly tabWidth: number;
     readonly bulletStyle: BulletStyle;
     readonly shortcutOverrides: ShortcutOverrides;
@@ -57,7 +56,6 @@ export const createDefaultSettings = (): MarkdownEnhancerSettings =>
         version: 1,
         isEnabled: true,
         isToolbarEnabled: true,
-        isPreviewEnabled: true,
         tabWidth: 4,
         bulletStyle: "-",
         shortcutOverrides: Object.freeze({}),
@@ -242,7 +240,6 @@ const normalizeCurrentSettings = (value: UnknownRecord): MarkdownEnhancerSetting
         version: 1,
         isEnabled: normalizeBoolean(value.isEnabled, true),
         isToolbarEnabled: normalizeBoolean(value.isToolbarEnabled, true),
-        isPreviewEnabled: normalizeBoolean(value.isPreviewEnabled, true),
         tabWidth: normalizeTabWidth(value.tabWidth),
         bulletStyle: normalizeBulletStyle(value.bulletStyle),
         shortcutOverrides: normalizeShortcutOverrides(value.shortcutOverrides),
@@ -254,7 +251,6 @@ const migrateLegacySettings = (value: UnknownRecord): MarkdownEnhancerSettings =
     normalizeCurrentSettings({
         isEnabled: value.enabled,
         isToolbarEnabled: value.toolbarEnabled,
-        isPreviewEnabled: value.previewEnabled,
         tabWidth: value.tabSize,
         bulletStyle: value.bulletCharacter,
         shortcutOverrides: value.shortcutOverrides,

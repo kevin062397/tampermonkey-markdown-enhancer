@@ -1,14 +1,9 @@
 import type { EditorCommand } from "./command-registry";
 
-export interface EditorAdapterCapabilities {
-    readonly isNativePreviewAvailable: boolean;
-}
-
 export type EditorToolbarPlacement = "before-editor" | "after-editor";
 
 export interface EditorAdapter {
     readonly id: string;
-    readonly capabilities: EditorAdapterCapabilities;
     readonly commands?: readonly EditorCommand[];
     readonly toolbarPlacement?: EditorToolbarPlacement;
     readonly shouldDispatchChangeEventAfterEdit?: boolean;

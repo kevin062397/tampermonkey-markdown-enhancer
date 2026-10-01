@@ -10,7 +10,6 @@ describe("Generic editor adapter", () => {
         expect(getActiveEditorAdapters([adapter], new URL("https://example.test/path"))).toEqual([adapter]);
         expect(getActiveEditorAdapters([adapter], new URL("http://localhost/editor"))).toEqual([adapter]);
         expect(resolveEditorFromPath([textArea], [adapter])?.textArea).toBe(textArea);
-        expect(adapter.capabilities.isNativePreviewAvailable).toBe(false);
         expect(adapter.toolbarPlacement).toBe("after-editor");
     });
 

@@ -22,15 +22,11 @@ const createRegistryOptions = (settings: MarkdownEnhancerSettings): CommandRegis
 });
 
 const createAdapterSnapshot = (adapter: EditorAdapter): EditorAdapter => {
-    const capabilities = adapter.capabilities;
     const commands = adapter.commands;
     const isPageSupported = adapter.isPageSupported;
     const isEditor = adapter.isEditor;
     return Object.freeze({
         id: adapter.id,
-        capabilities: Object.freeze({
-            isNativePreviewAvailable: capabilities.isNativePreviewAvailable
-        }),
         commands: commands ? createCommandSnapshots(commands) : undefined,
         toolbarPlacement: adapter.toolbarPlacement,
         shouldDispatchChangeEventAfterEdit: adapter.shouldDispatchChangeEventAfterEdit,

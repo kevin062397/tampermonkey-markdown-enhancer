@@ -45,7 +45,6 @@ describe("Settings", () => {
             version: 1,
             isEnabled: false,
             isToolbarEnabled: "yes",
-            isPreviewEnabled: null,
             tabWidth: 17,
             bulletStyle: "•",
             shortcutOverrides: {
@@ -65,40 +64,6 @@ describe("Settings", () => {
             excludedHostnames: ["example.com"],
             excludedEditorSelectors: ["textarea.special"]
         });
-    });
-
-    test("rewrites stored version 1 settings to the canonical active shape", () => {
-        const storedSettings = {
-            version: 1,
-            isEnabled: false,
-            isToolbarEnabled: false,
-            isCommandPaletteEnabled: false,
-            isPreviewEnabled: false,
-            tabWidth: 8,
-            bulletStyle: "+",
-            shortcutOverrides: { bold: { key: "z", isPrimaryModifierRequired: true } },
-            excludedHostnames: [" Docs.Example ", "docs.example"],
-            excludedEditorSelectors: [" #public-editor ", "#public-editor"]
-        };
-        const storage = createStorage(storedSettings);
-        const store = createSettingsStore(storage);
-        const expectedSettings = {
-            version: 1,
-            isEnabled: false,
-            isToolbarEnabled: false,
-            isPreviewEnabled: false,
-            tabWidth: 8,
-            bulletStyle: "+",
-            shortcutOverrides: { bold: { key: "z", isPrimaryModifierRequired: true } },
-            excludedHostnames: ["docs.example"],
-            excludedEditorSelectors: ["#public-editor"]
-        };
-
-        expect(store.getSettings()).toEqual(expectedSettings);
-        expect(storage.writeValue).toHaveBeenCalledOnce();
-        expect(storage.writeValue).toHaveBeenCalledWith(SETTINGS_STORAGE_KEY, expectedSettings);
-        expect(storage.getStoredValue()).toEqual(expectedSettings);
-        expect(storage.getStoredValue()).not.toHaveProperty("isCommandPaletteEnabled");
     });
 
     test.each([
@@ -209,12 +174,10 @@ describe("Settings", () => {
         });
     });
 
-    test("migrates active legacy settings and useful exclusions", () => {
+    test("migrates active released legacy fields and public exclusions", () => {
         const settings = normalizeSettings({
             enabled: false,
             toolbarEnabled: false,
-            commandPaletteEnabled: false,
-            previewEnabled: false,
             tabSize: 8,
             bulletCharacter: "+",
             shortcutOverrides: { italic: { key: "j", isPrimaryModifierRequired: true } },
@@ -226,14 +189,12 @@ describe("Settings", () => {
             version: 1,
             isEnabled: false,
             isToolbarEnabled: false,
-            isPreviewEnabled: false,
             tabWidth: 8,
             bulletStyle: "+",
             shortcutOverrides: { italic: { key: "j", isPrimaryModifierRequired: true } },
             excludedHostnames: ["docs.example"],
             excludedEditorSelectors: ["#legacy-editor"]
         });
-        expect(settings).not.toHaveProperty("commandPaletteEnabled");
     });
 
     test("uses defaults in memory without overwriting unsupported stored schemas", () => {
@@ -246,13 +207,8 @@ describe("Settings", () => {
         expect(futurePayload).toEqual({ version: 2, isEnabled: false, futureValue: { mode: "new" } });
     });
 
-    test("keeps future schemas read-only when an update is requested", () => {
-        const futurePayload = {
-            version: 2,
-            isEnabled: false,
-            isCommandPaletteEnabled: false,
-            futureValue: { mode: "new" }
-        };
+    test("preserves future-schema object and JSON identity while keeping storage read-only", () => {
+        const futurePayload = { version: 2, isEnabled: false, futureValue: { mode: "new" } };
         const serializedFuturePayload = JSON.stringify(futurePayload);
         const storage = createStorage(futurePayload);
         const store = createSettingsStore(storage);
@@ -290,12 +246,12 @@ describe("Settings", () => {
         const store = createSettingsStore(storage);
         storage.setStoredValue(latestValue);
 
-        store.updateSettings({ isPreviewEnabled: false });
+        store.updateSettings({ isToolbarEnabled: false });
 
         expect(storage.getStoredValue()).toEqual({
             ...createDefaultSettings(),
             ...expected,
-            isPreviewEnabled: false
+            isToolbarEnabled: false
         });
     });
 

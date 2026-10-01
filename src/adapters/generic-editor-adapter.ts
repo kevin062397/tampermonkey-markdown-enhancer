@@ -7,7 +7,6 @@ export interface GenericEditorAdapterOptions {
 
 export const createGenericEditorAdapter = (options: GenericEditorAdapterOptions = {}): EditorAdapter => ({
     id: "generic-textarea",
-    capabilities: { isNativePreviewAvailable: false },
     toolbarPlacement: "after-editor",
     isPageSupported: (url) => !options.isPageExcluded?.(url),
     isEditor: (element): element is HTMLTextAreaElement =>

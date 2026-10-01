@@ -13,7 +13,6 @@ const createAdapter = (
     commands: readonly EditorCommand[] = []
 ): EditorAdapter => ({
     id,
-    capabilities: { isNativePreviewAvailable: false },
     commands,
     isPageSupported: () => isPageSupported,
     isEditor: (element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement

@@ -20,7 +20,6 @@ const createAdapter = (
     commands: readonly EditorCommand[] = []
 ): EditorAdapter => ({
     id,
-    capabilities: { isNativePreviewAvailable: false },
     commands,
     isPageSupported,
     isEditor
@@ -220,7 +219,6 @@ describe("Markdown enhancer runtime", () => {
 
         class ClassAdapter implements EditorAdapter {
             readonly id = "class-adapter";
-            readonly capabilities = { isNativePreviewAvailable: false };
             commandReads = 0;
             readonly command = new ClassCommand();
 
