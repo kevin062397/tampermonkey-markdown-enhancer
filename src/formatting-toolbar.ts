@@ -1,5 +1,6 @@
 import { EDITOR_COMMAND_IDS, type EditorCommand, type EditorCommandRegistry } from "./command-registry";
 import type { EditorToolbarPlacement } from "./editor-adapter";
+import { createToolbarCommandIcon, createToolbarMoreIcon, TOOLBAR_ICON_CLASS } from "./formatting-toolbar-icons";
 
 export interface FormattingToolbarEditor {
     readonly textArea: HTMLTextAreaElement;
@@ -28,16 +29,17 @@ const TOOLBAR_CLASS = "tampermonkey-markdown-enhancer-formatting-toolbar";
 const TOOLBAR_DATA_ATTRIBUTE = "data-tampermonkey-markdown-enhancer-formatting-toolbar";
 const OVERFLOW_PANEL_CLASS = `${TOOLBAR_CLASS}__overflow-panel`;
 const OVERFLOW_WRAPPER_CLASS = `${TOOLBAR_CLASS}__overflow-wrapper`;
+const BUTTON_LABEL_CLASS = `${TOOLBAR_CLASS}__label`;
 
-const PRIMARY_COMMANDS: ReadonlyArray<readonly [string, string]> = [
-    [EDITOR_COMMAND_IDS.bold, "B"],
-    [EDITOR_COMMAND_IDS.italic, "I"],
-    [EDITOR_COMMAND_IDS.strikethrough, "S"],
-    [EDITOR_COMMAND_IDS.inlineCode, "<>"],
-    [EDITOR_COMMAND_IDS.link, "Link"]
+const PRIMARY_COMMANDS: readonly string[] = [
+    EDITOR_COMMAND_IDS.bold,
+    EDITOR_COMMAND_IDS.italic,
+    EDITOR_COMMAND_IDS.strikethrough,
+    EDITOR_COMMAND_IDS.inlineCode,
+    EDITOR_COMMAND_IDS.link
 ];
 
-const PRIMARY_COMMAND_IDS = new Set(PRIMARY_COMMANDS.map(([commandId]) => commandId));
+const PRIMARY_COMMAND_IDS = new Set(PRIMARY_COMMANDS);
 
 const TOOLBAR_STYLES = `
 .${TOOLBAR_CLASS} {
@@ -64,6 +66,7 @@ const TOOLBAR_STYLES = `
 }
 .${TOOLBAR_CLASS} button {
     all: initial !important;
+    align-items: center !important;
     background: #ffffff !important;
     border: 1px solid #a8a8a8 !important;
     border-radius: 3px !important;
@@ -71,6 +74,7 @@ const TOOLBAR_STYLES = `
     cursor: pointer !important;
     display: inline-flex !important;
     font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+    gap: 5px !important;
     justify-content: center !important;
     min-height: 26px !important;
     min-width: 28px !important;
@@ -89,6 +93,16 @@ const TOOLBAR_STYLES = `
     color: #777777 !important;
     cursor: default !important;
     opacity: 0.55 !important;
+}
+.${TOOLBAR_CLASS} .${TOOLBAR_ICON_CLASS} {
+    display: block !important;
+    fill: currentColor !important;
+    flex: none !important;
+    height: 16px !important;
+    width: 16px !important;
+}
+.${TOOLBAR_CLASS} .${BUTTON_LABEL_CLASS} {
+    display: inline-block !important;
 }
 .${OVERFLOW_WRAPPER_CLASS} {
     all: initial !important;
@@ -116,8 +130,36 @@ const TOOLBAR_STYLES = `
     display: none !important;
 }
 .${OVERFLOW_PANEL_CLASS} button {
+    font-weight: 600 !important;
     justify-content: flex-start !important;
     width: 100% !important;
+}
+@media (forced-colors: active) {
+    .${TOOLBAR_CLASS},
+    .${OVERFLOW_PANEL_CLASS} {
+        background: Canvas !important;
+        border-color: CanvasText !important;
+    }
+    .${OVERFLOW_PANEL_CLASS} {
+        box-shadow: none !important;
+    }
+    .${TOOLBAR_CLASS} button {
+        background: ButtonFace !important;
+        border-color: ButtonText !important;
+        color: ButtonText !important;
+        forced-color-adjust: auto !important;
+    }
+    .${TOOLBAR_CLASS} button:hover:not(:disabled) {
+        background: Highlight !important;
+        color: HighlightText !important;
+    }
+    .${TOOLBAR_CLASS} button:focus-visible {
+        outline-color: Highlight !important;
+    }
+    .${TOOLBAR_CLASS} button:disabled {
+        color: GrayText !important;
+        opacity: 1 !important;
+    }
 }
 `;
 
@@ -280,15 +322,19 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         });
     };
 
-    const createCommandButton = (command: EditorCommand, label: string, isMenuItem: boolean): HTMLButtonElement => {
+    const createCommandButton = (command: EditorCommand, isMenuItem: boolean): HTMLButtonElement => {
         const button = document.createElement("button");
         button.type = "button";
         button.dataset.commandId = command.id;
-        button.textContent = label;
+        button.append(createToolbarCommandIcon(command.id));
         button.title = command.label;
         button.setAttribute("aria-label", command.label);
         button.tabIndex = -1;
         if (isMenuItem) {
+            const label = document.createElement("span");
+            label.className = BUTTON_LABEL_CLASS;
+            label.textContent = command.label;
+            button.append(label);
             button.setAttribute("role", "menuitem");
         }
         return button;
@@ -315,10 +361,10 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         const commandsById = new Map(commands.map((command) => [command.id, command]));
         const elements: Node[] = [style];
 
-        for (const [commandId, symbol] of PRIMARY_COMMANDS) {
+        for (const commandId of PRIMARY_COMMANDS) {
             const command = commandsById.get(commandId);
             if (command) {
-                elements.push(createCommandButton(command, symbol, false));
+                elements.push(createCommandButton(command, false));
             }
         }
 
@@ -327,7 +373,10 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         const panelId = createOverflowPanelId(root);
         overflowTrigger = document.createElement("button");
         overflowTrigger.type = "button";
-        overflowTrigger.textContent = "More";
+        const overflowLabel = document.createElement("span");
+        overflowLabel.className = BUTTON_LABEL_CLASS;
+        overflowLabel.textContent = "More";
+        overflowTrigger.append(createToolbarMoreIcon(), overflowLabel);
         overflowTrigger.title = "More formatting commands";
         overflowTrigger.setAttribute("aria-label", "More formatting commands");
         overflowTrigger.setAttribute("aria-haspopup", "menu");
@@ -342,7 +391,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         overflowPanel.setAttribute("role", "menu");
         overflowPanel.setAttribute("aria-label", "More formatting commands");
         for (const command of commands.filter(({ id }) => !PRIMARY_COMMAND_IDS.has(id))) {
-            overflowPanel.append(createCommandButton(command, command.label, true));
+            overflowPanel.append(createCommandButton(command, true));
         }
         overflowWrapper.append(overflowTrigger, overflowPanel);
         elements.push(overflowWrapper);

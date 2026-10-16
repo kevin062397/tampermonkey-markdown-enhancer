@@ -5,6 +5,7 @@ import {
     type FormattingToolbarEditor,
     type FormattingToolbarOptions
 } from "./formatting-toolbar";
+import { createToolbarCommandIcon, TOOLBAR_ICON_CLASS } from "./formatting-toolbar-icons";
 
 const TOOLBAR_SELECTOR = "[data-tampermonkey-markdown-enhancer-formatting-toolbar]";
 const PRIMARY_COMMAND_IDS = new Set<string>([
@@ -506,5 +507,106 @@ describe("Formatting toolbar", () => {
         await flushMutationObserver();
         expect(fixture.getToolbar()).toBeNull();
         fixture = undefined;
+    });
+
+    test("renders accessible local icons with the required toolbar text visibility", () => {
+        const registry = createCommandRegistry([
+            {
+                id: "contributed.command",
+                label: "Contributed command",
+                isAvailable: () => true,
+                execute: () => true
+            }
+        ]);
+        fixture = createFixture(registry);
+        const textArea = createTextArea();
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+
+        const primaryPresentations: ReadonlyArray<readonly [string, string]> = [
+            [EDITOR_COMMAND_IDS.bold, "Bold"],
+            [EDITOR_COMMAND_IDS.italic, "Italic"],
+            [EDITOR_COMMAND_IDS.strikethrough, "Strikethrough"],
+            [EDITOR_COMMAND_IDS.inlineCode, "Inline code"],
+            [EDITOR_COMMAND_IDS.link, "Link"]
+        ];
+        for (const [commandId, label] of primaryPresentations) {
+            const button = getCommandButton(toolbar, commandId);
+            const icon = button.firstElementChild;
+            expect(button.textContent).toBe("");
+            expect(button.children).toHaveLength(1);
+            expect(button.title).toBe(label);
+            expect(button.getAttribute("aria-label")).toBe(label);
+            expect(icon?.localName).toBe("svg");
+            expect(icon?.getAttribute("aria-hidden")).toBe("true");
+            expect(icon?.getAttribute("focusable")).toBe("false");
+        }
+
+        const trigger = getOverflowTrigger(toolbar);
+        expect(trigger.textContent).toBe("More");
+        expect(trigger.firstElementChild?.localName).toBe("svg");
+        expect(trigger.firstElementChild?.getAttribute("aria-hidden")).toBe("true");
+        expect(trigger.lastElementChild?.textContent).toBe("More");
+        expect(trigger.title).toBe("More formatting commands");
+        expect(trigger.getAttribute("aria-label")).toBe("More formatting commands");
+
+        const overflowCommands = registry.listCommands().filter(({ id }) => !PRIMARY_COMMAND_IDS.has(id));
+        for (const command of overflowCommands) {
+            const button = getCommandButton(toolbar, command.id);
+            expect(button.textContent).toBe(command.label);
+            expect(button.title).toBe(command.label);
+            expect(button.getAttribute("aria-label")).toBe(command.label);
+            expect(button.firstElementChild?.localName).toBe("svg");
+            expect(button.firstElementChild?.getAttribute("aria-hidden")).toBe("true");
+            expect(button.lastElementChild?.textContent).toBe(command.label);
+        }
+
+        const contributedIcon = getCommandButton(toolbar, "contributed.command").querySelector("svg");
+        expect(contributedIcon?.innerHTML).toBe(createToolbarCommandIcon("contributed.command").innerHTML);
+        const icons = toolbar.querySelectorAll(`svg.${TOOLBAR_ICON_CLASS}`);
+        expect(icons).toHaveLength(toolbar.querySelectorAll("button").length);
+        expect(new Set(icons).size).toBe(icons.length);
+        expect(toolbar.querySelectorAll("[src], [href]")).toHaveLength(0);
+
+        const style = toolbar.querySelector("style");
+        expect(style?.textContent).toContain(`.${TOOLBAR_ICON_CLASS}`);
+        expect(style?.textContent).toContain("fill: currentColor");
+        expect(style?.textContent).toContain("@media (forced-colors: active)");
+        expect(style?.textContent).toContain("background: Canvas");
+        expect(style?.textContent).toContain("background: ButtonFace");
+        expect(style?.textContent).toContain("border-color: ButtonText");
+        expect(style?.textContent).toContain("color: GrayText");
+        expect(style?.textContent).toContain("opacity: 1 !important");
+        expect(style?.textContent).toContain("font-weight: 600 !important");
+    });
+
+    test("executes commands from nested SVG activation targets", () => {
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.value = "selected";
+        textArea.setSelectionRange(0, textArea.value.length);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        const iconTarget = getCommandButton(toolbar, EDITOR_COMMAND_IDS.bold).querySelector("path");
+        if (!iconTarget) {
+            throw new Error("Expected bold icon path");
+        }
+
+        const pointerEvent = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        iconTarget.dispatchEvent(pointerEvent);
+        iconTarget.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+        expect(pointerEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("**selected**");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 10]);
+        expect(document.activeElement).toBe(textArea);
     });
 });
