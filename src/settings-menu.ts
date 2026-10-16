@@ -8,6 +8,7 @@ import {
     MAX_EDITOR_SELECTOR_LENGTH,
     normalizeCommandShortcut,
     normalizeEditorSelectors,
+    type MarkdownEnhancerSettings,
     type SettingsStore,
     type ShortcutCommandId,
     type ShortcutOverride,
@@ -15,10 +16,14 @@ import {
 } from "./settings";
 
 export interface SettingsMenuEnvironment {
-    readonly registerCommand: (label: string, callback: () => void) => void;
+    readonly registerCommand: (label: string, callback: () => void, existingCommandId?: number) => unknown;
     readonly requestInput: (prompt: string, currentValue: string) => string | null;
     readonly getPrimaryModifierLabel: () => PrimaryModifierLabel;
     readonly getPageUrl: () => URL;
+}
+
+export interface SettingsMenuController {
+    readonly refresh: () => void;
 }
 
 const parseTabWidth = (input: string): number | undefined => {
@@ -97,16 +102,39 @@ const registerShortcutAction = (
     });
 };
 
-const registerEditingToggle = (environment: SettingsMenuEnvironment, store: SettingsStore): void => {
-    environment.registerCommand("Toggle Markdown Editing", () => {
-        store.updateSettings((settings) => ({ isEnabled: !settings.isEnabled }));
-    });
-};
+const getEditingActionLabel = (isEnabled: boolean): string =>
+    isEnabled ? "Disable Markdown Editing" : "Enable Markdown Editing";
 
-const registerToolbarToggle = (environment: SettingsMenuEnvironment, store: SettingsStore): void => {
-    environment.registerCommand("Toggle Formatting Toolbar", () => {
-        store.updateSettings((settings) => ({ isToolbarEnabled: !settings.isToolbarEnabled }));
-    });
+const getToolbarActionLabel = (isEnabled: boolean): string =>
+    isEnabled ? "Disable Formatting Toolbar" : "Enable Formatting Toolbar";
+
+const isValidCommandId = (commandId: unknown): commandId is number =>
+    typeof commandId === "number" && Number.isFinite(commandId);
+
+const createContainedEnvironment = (environment: SettingsMenuEnvironment): SettingsMenuEnvironment => ({
+    registerCommand: (label, callback, existingCommandId) =>
+        environment.registerCommand(
+            label,
+            () => {
+                try {
+                    callback();
+                } catch {
+                    // A menu callback must not escape into the page or userscript runtime.
+                }
+            },
+            existingCommandId
+        ),
+    requestInput: (prompt, currentValue) => environment.requestInput(prompt, currentValue),
+    getPrimaryModifierLabel: () => environment.getPrimaryModifierLabel(),
+    getPageUrl: () => environment.getPageUrl()
+});
+
+const registerAction = (action: () => void): void => {
+    try {
+        action();
+    } catch {
+        // One unavailable menu action must not suppress the remaining actions.
+    }
 };
 
 const registerTabWidthAction = (environment: SettingsMenuEnvironment, store: SettingsStore): void => {
@@ -174,13 +202,97 @@ const registerEditorSelectorAction = (environment: SettingsMenuEnvironment, stor
     });
 };
 
-export const registerSettingsMenu = (environment: SettingsMenuEnvironment, store: SettingsStore): void => {
-    registerEditingToggle(environment, store);
-    registerToolbarToggle(environment, store);
-    registerTabWidthAction(environment, store);
-    registerShortcutAction(environment, store, "bold", "Set Bold Shortcut");
-    registerShortcutAction(environment, store, "italic", "Set Italic Shortcut");
-    registerShortcutAction(environment, store, "link", "Set Link Shortcut");
-    registerHostnameAction(environment, store);
-    registerEditorSelectorAction(environment, store);
+export const registerSettingsMenu = (
+    environment: SettingsMenuEnvironment,
+    store: SettingsStore
+): SettingsMenuController => {
+    const containedEnvironment = createContainedEnvironment(environment);
+    let editingCommandId: number | undefined;
+    let toolbarCommandId: number | undefined;
+    let refreshMenu = (): void => undefined;
+
+    const handleEditingToggle = (): void => {
+        try {
+            store.updateSettings((settings) => ({ isEnabled: !settings.isEnabled }));
+        } catch {
+            // Refresh the visible actions even when this settings update is unavailable.
+        }
+        refreshMenu();
+    };
+
+    const handleToolbarToggle = (): void => {
+        try {
+            store.updateSettings((settings) => ({ isToolbarEnabled: !settings.isToolbarEnabled }));
+        } catch {
+            // Refresh the visible actions even when this settings update is unavailable.
+        }
+        refreshMenu();
+    };
+
+    try {
+        const settings = store.getSettings();
+        registerAction(() => {
+            const commandId = containedEnvironment.registerCommand(
+                getEditingActionLabel(settings.isEnabled),
+                handleEditingToggle
+            );
+            if (isValidCommandId(commandId)) {
+                editingCommandId = commandId;
+            }
+        });
+        registerAction(() => {
+            const commandId = containedEnvironment.registerCommand(
+                getToolbarActionLabel(settings.isToolbarEnabled),
+                handleToolbarToggle
+            );
+            if (isValidCommandId(commandId)) {
+                toolbarCommandId = commandId;
+            }
+        });
+    } catch {
+        // Static actions remain available when the initial state cannot be read.
+    }
+
+    registerAction(() => registerTabWidthAction(containedEnvironment, store));
+    registerAction(() => registerShortcutAction(containedEnvironment, store, "bold", "Set Bold Shortcut"));
+    registerAction(() => registerShortcutAction(containedEnvironment, store, "italic", "Set Italic Shortcut"));
+    registerAction(() => registerShortcutAction(containedEnvironment, store, "link", "Set Link Shortcut"));
+    registerAction(() => registerHostnameAction(containedEnvironment, store));
+    registerAction(() => registerEditorSelectorAction(containedEnvironment, store));
+
+    refreshMenu = (): void => {
+        let settings: MarkdownEnhancerSettings;
+        try {
+            settings = store.getSettings();
+        } catch {
+            return;
+        }
+
+        if (editingCommandId !== undefined) {
+            registerAction(() => {
+                const refreshedCommandId = containedEnvironment.registerCommand(
+                    getEditingActionLabel(settings.isEnabled),
+                    handleEditingToggle,
+                    editingCommandId
+                );
+                if (isValidCommandId(refreshedCommandId)) {
+                    editingCommandId = refreshedCommandId;
+                }
+            });
+        }
+        if (toolbarCommandId !== undefined) {
+            registerAction(() => {
+                const refreshedCommandId = containedEnvironment.registerCommand(
+                    getToolbarActionLabel(settings.isToolbarEnabled),
+                    handleToolbarToggle,
+                    toolbarCommandId
+                );
+                if (isValidCommandId(refreshedCommandId)) {
+                    toolbarCommandId = refreshedCommandId;
+                }
+            });
+        }
+    };
+
+    return { refresh: () => refreshMenu() };
 };
