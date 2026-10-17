@@ -237,8 +237,82 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     let isRefreshQueued = false;
     let observer: MutationObserver | undefined;
     const observedShadowRoots = new WeakSet<ShadowRoot>();
+    const outsidePointerRoots = new Set<ToolbarRoot>();
+    const deferredOutsidePointerDismissals = new WeakMap<Event, object>();
 
-    const isToolbarEvent = (event: Event): boolean => event.composedPath().includes(container);
+    let placedToolbarAncestors: readonly Node[] = [];
+
+    const resolveEventPath = (
+        event: Event
+    ): { readonly isTargetFallback: boolean; readonly path: readonly EventTarget[] } => {
+        try {
+            const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+            if (path.length > 0) {
+                return { isTargetFallback: false, path };
+            }
+        } catch {
+            // Fall through to the event target supplied by the dispatching root.
+        }
+        return { isTargetFallback: true, path: event.target ? [event.target] : [] };
+    };
+
+    const isEventWithinElement = (
+        event: Event,
+        element: Element,
+        path: readonly EventTarget[] = resolveEventPath(event).path
+    ): boolean => {
+        if (path.includes(element)) {
+            return true;
+        }
+        return event.target instanceof Node && element.contains(event.target);
+    };
+
+    const isToolbarEvent = (event: Event): boolean => isEventWithinElement(event, container);
+
+    const getEnclosingToolbarRoots = (): ToolbarRoot[] => {
+        const roots: ToolbarRoot[] = [];
+        let root = container.getRootNode();
+        while (root instanceof ShadowRoot) {
+            roots.push(root);
+            root = root.host.getRootNode();
+        }
+        roots.push(container.ownerDocument);
+        return roots;
+    };
+
+    const getToolbarAncestors = (): Node[] => {
+        const ancestors: Node[] = [];
+        let current: Node | null = container.parentNode;
+        while (current) {
+            ancestors.push(current);
+            current = current.parentNode ?? (current instanceof ShadowRoot ? current.host : null);
+        }
+        return ancestors;
+    };
+
+    const areToolbarAncestorsCurrent = (): boolean => {
+        const ancestors = getToolbarAncestors();
+        return (
+            ancestors.length === placedToolbarAncestors.length &&
+            ancestors.every((ancestor, index) => ancestor === placedToolbarAncestors[index])
+        );
+    };
+
+    const removeOutsidePointerDismissal = (): void => {
+        for (const root of outsidePointerRoots) {
+            root.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+        }
+        outsidePointerRoots.clear();
+    };
+
+    const addOutsidePointerDismissal = (): void => {
+        for (const root of getEnclosingToolbarRoots()) {
+            if (!outsidePointerRoots.has(root)) {
+                root.addEventListener("pointerdown", handleOutsidePointerDown, true);
+                outsidePointerRoots.add(root);
+            }
+        }
+    };
 
     const getTopLevelButtons = (): HTMLButtonElement[] =>
         Array.from(container.children).flatMap((child) => {
@@ -286,6 +360,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         JSON.stringify(registry.listCommands().map(({ id, label }) => [id, label]));
 
     const closeOverflow = (shouldFocusTrigger = false): void => {
+        removeOutsidePointerDismissal();
         if (!overflowPanel || !overflowTrigger) {
             return;
         }
@@ -346,6 +421,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         }
         overflowPanel.hidden = false;
         overflowTrigger.setAttribute("aria-expanded", "true");
+        addOutsidePointerDismissal();
         refreshAvailability();
         if (focusTarget) {
             const commands = getEnabledButtons(overflowPanel);
@@ -357,6 +433,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     };
 
     const renderCommands = (registry: EditorCommandRegistry, root: ToolbarRoot): void => {
+        closeOverflow();
         const commands = registry.listCommands();
         const commandsById = new Map(commands.map((command) => [command.id, command]));
         const elements: Node[] = [style];
@@ -408,6 +485,15 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         }
     };
 
+    const isToolbarPlaced = (editor: FormattingToolbarEditor): boolean => {
+        if (!editor.textArea.parentNode) {
+            return false;
+        }
+        return editor.toolbarPlacement === "before-editor"
+            ? editor.textArea.previousSibling === container
+            : editor.textArea.nextSibling === container;
+    };
+
     const placeToolbar = (editor: FormattingToolbarEditor): void => {
         const parent = editor.textArea.parentNode;
         if (!parent) {
@@ -420,11 +506,13 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         } else if (editor.textArea.nextSibling !== container) {
             parent.insertBefore(container, editor.textArea.nextSibling);
         }
+        placedToolbarAncestors = getToolbarAncestors();
     };
 
     const removeToolbar = (): void => {
         closeOverflow();
         container.remove();
+        placedToolbarAncestors = [];
         activeEditor = undefined;
         savedSelection = undefined;
     };
@@ -432,10 +520,19 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     const activateEditor = (editor: FormattingToolbarEditor): void => {
         const isSameEditor = activeEditor?.textArea === editor.textArea;
         const commandPresentation = getCommandPresentation(editor.commandRegistry);
+        const isCommandPresentationChanged = commandPresentation !== renderedCommandPresentation;
+        if (
+            !isSameEditor ||
+            isCommandPresentationChanged ||
+            !isToolbarPlaced(editor) ||
+            !areToolbarAncestorsCurrent()
+        ) {
+            closeOverflow();
+        }
         activeEditor = editor;
         savedSelection = captureEditorSelection(editor.textArea);
         observeEditorRoot(editor);
-        if (!isSameEditor || commandPresentation !== renderedCommandPresentation) {
+        if (!isSameEditor || isCommandPresentationChanged) {
             renderCommands(editor.commandRegistry, getEditorRoot(editor.textArea));
         }
         placeToolbar(editor);
@@ -465,13 +562,13 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
             return;
         }
         const selection = savedSelection ?? captureEditorSelection(editor.textArea);
+        closeOverflow();
         restoreEditorSelection(editor.textArea, selection);
         const valueBeforeEdit = editor.textArea.value;
         editor.commandRegistry.executeCommand(commandId, { textArea: editor.textArea });
         focusElementWithoutScrolling(editor.textArea);
         savedSelection = captureEditorSelection(editor.textArea);
         dispatchChangeEventIfRequired(editor, valueBeforeEdit);
-        closeOverflow();
         refreshAvailability();
     };
 
@@ -508,7 +605,12 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
             } else {
                 activeEditor = editor;
                 savedSelection = captureEditorSelection(editor.textArea);
-                if (getCommandPresentation(editor.commandRegistry) !== renderedCommandPresentation) {
+                const isCommandPresentationChanged =
+                    getCommandPresentation(editor.commandRegistry) !== renderedCommandPresentation;
+                if (isCommandPresentationChanged || !isToolbarPlaced(editor) || !areToolbarAncestorsCurrent()) {
+                    closeOverflow();
+                }
+                if (isCommandPresentationChanged) {
                     renderCommands(editor.commandRegistry, getEditorRoot(editor.textArea));
                 }
                 placeToolbar(editor);
@@ -531,7 +633,12 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
             } else {
                 activeEditor = editor;
                 savedSelection = captureEditorSelection(editor.textArea);
-                if (getCommandPresentation(editor.commandRegistry) !== renderedCommandPresentation) {
+                const isCommandPresentationChanged =
+                    getCommandPresentation(editor.commandRegistry) !== renderedCommandPresentation;
+                if (isCommandPresentationChanged || !isToolbarPlaced(editor) || !areToolbarAncestorsCurrent()) {
+                    closeOverflow();
+                }
+                if (isCommandPresentationChanged) {
                     renderCommands(editor.commandRegistry, getEditorRoot(editor.textArea));
                 }
                 placeToolbar(editor);
@@ -610,6 +717,57 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
             captureSelectionForActivation(event);
         }
     };
+
+    const isPrimaryPointerActivation = (event: Event): boolean => {
+        if ("isPrimary" in event && event.isPrimary === false) {
+            return false;
+        }
+        return !("button" in event && typeof event.button === "number" && event.button !== 0);
+    };
+
+    const shouldDeferToDeeperOutsidePointerRoot = (event: Event, isTargetFallback: boolean): boolean => {
+        if (!isTargetFallback || !(event.target instanceof Node)) {
+            return false;
+        }
+        for (const root of outsidePointerRoots) {
+            if (root instanceof ShadowRoot && root.host === event.target) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    function handleOutsidePointerDown(event: Event): void {
+        const { isTargetFallback, path } = resolveEventPath(event);
+        deferredOutsidePointerDismissals.delete(event);
+        if (!isPrimaryPointerActivation(event) || !overflowPanel || overflowPanel.hidden) {
+            return;
+        }
+        if (shouldDeferToDeeperOutsidePointerRoot(event, isTargetFallback)) {
+            const deferredPanel = overflowPanel;
+            const deferral = {};
+            deferredOutsidePointerDismissals.set(event, deferral);
+            void Promise.resolve().then(() => {
+                if (
+                    deferredOutsidePointerDismissals.get(event) !== deferral ||
+                    overflowPanel !== deferredPanel ||
+                    deferredPanel.hidden
+                ) {
+                    return;
+                }
+                deferredOutsidePointerDismissals.delete(event);
+                closeOverflow();
+            });
+            return;
+        }
+        if (
+            isEventWithinElement(event, overflowPanel, path) ||
+            (overflowTrigger && isEventWithinElement(event, overflowTrigger, path))
+        ) {
+            return;
+        }
+        closeOverflow();
+    }
 
     const handleToolbarClick = (event: MouseEvent): void => {
         const button = getEventButton(event);
