@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { CONCRETE_BLOCK_STYLES } from "./block-styles";
 import {
     createCommandRegistry,
     EDITOR_COMMAND_IDS,
     type EditorCommand,
     type EditorCommandContext
 } from "./command-registry";
+import { toggleFencedCodeBlockCommand, toggleLinePrefixCommand } from "./commands";
 
 const createTextArea = (value: string, selectionStart: number, selectionEnd: number): HTMLTextAreaElement => {
     const textArea = document.createElement("textarea");
@@ -29,8 +31,8 @@ describe("Command registry", () => {
             { id: EDITOR_COMMAND_IDS.italic, label: "Italic" },
             { id: EDITOR_COMMAND_IDS.strikethrough, label: "Strikethrough" },
             { id: EDITOR_COMMAND_IDS.inlineCode, label: "Inline code" },
-            { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code block" },
             { id: EDITOR_COMMAND_IDS.link, label: "Link" },
+            { id: EDITOR_COMMAND_IDS.text, label: "Text" },
             { id: EDITOR_COMMAND_IDS.heading1, label: "Heading 1" },
             { id: EDITOR_COMMAND_IDS.heading2, label: "Heading 2" },
             { id: EDITOR_COMMAND_IDS.heading3, label: "Heading 3" },
@@ -38,6 +40,7 @@ describe("Command registry", () => {
             { id: EDITOR_COMMAND_IDS.heading5, label: "Heading 5" },
             { id: EDITOR_COMMAND_IDS.heading6, label: "Heading 6" },
             { id: EDITOR_COMMAND_IDS.blockquote, label: "Blockquote" },
+            { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code block" },
             { id: EDITOR_COMMAND_IDS.bulletList, label: "Bullet list" },
             { id: EDITOR_COMMAND_IDS.numberedList, label: "Numbered list" },
             { id: EDITOR_COMMAND_IDS.taskList, label: "Task list" }
@@ -167,22 +170,25 @@ describe("Command registry", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 5]);
     });
 
-    test("executes the code-block command and selects its language placeholder", () => {
+    test("executes deterministic code-block commands without a language placeholder", () => {
         const registry = createCommandRegistry();
         const textArea = createTextArea("code", 0, 4);
         const context = { textArea };
 
         expect(registry.executeCommand(EDITOR_COMMAND_IDS.codeBlock, context)).toBe(true);
-        expect(textArea.value).toBe("```language\ncode\n```");
-        expect(textArea.value.slice(textArea.selectionStart, textArea.selectionEnd)).toBe("language");
+        expect(textArea.value).toBe("```\ncode\n```");
+        expect(textArea.value.slice(textArea.selectionStart, textArea.selectionEnd)).toBe("code");
 
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.codeBlock, context)).toBe(false);
+        expect(textArea.value).toBe("```\ncode\n```");
+
+        textArea.value = "";
+        textArea.setSelectionRange(0, 0);
+        expect(registry.getCommand(EDITOR_COMMAND_IDS.codeBlock)?.isAvailable(context)).toBe(true);
         expect(registry.executeCommand(EDITOR_COMMAND_IDS.codeBlock, context)).toBe(true);
-        expect(textArea.value).toBe("code");
-        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([0, 4]);
+        expect(textArea.value).toBe("```\n\n```");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([4, 4]);
 
-        textArea.setSelectionRange(2, 2);
-        expect(registry.getCommand(EDITOR_COMMAND_IDS.codeBlock)?.isAvailable(context)).toBe(false);
-        textArea.setSelectionRange(0, 4);
         textArea.readOnly = true;
         expect(registry.getCommand(EDITOR_COMMAND_IDS.codeBlock)?.isAvailable(context)).toBe(false);
     });
@@ -223,7 +229,7 @@ describe("Command registry", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([3, 12]);
     });
 
-    test("executes line-prefix commands for collapsed selections", () => {
+    test("executes deterministic line-style commands for collapsed selections", () => {
         const registry = createCommandRegistry();
         const textArea = createTextArea("title", 2, 2);
         const context = { textArea };
@@ -233,7 +239,9 @@ describe("Command registry", () => {
         expect(textArea.value).toBe("### title");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([6, 6]);
 
-        expect(registry.executeCommand(EDITOR_COMMAND_IDS.heading3, context)).toBe(true);
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.heading3, context)).toBe(false);
+        expect(textArea.value).toBe("### title");
+        expect(registry.executeCommand(EDITOR_COMMAND_IDS.text, context)).toBe(true);
         expect(textArea.value).toBe("title");
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([2, 2]);
     });
@@ -417,5 +425,82 @@ describe("Command registry", () => {
         expect(isInjectedCommandAvailable).toHaveBeenCalledWith(context);
         expect(executeInjectedCommand).toHaveBeenCalledWith(context);
         expect(() => createCommandRegistry([injectedCommand, injectedCommand])).toThrow("Duplicate command ID");
+    });
+});
+
+describe("Command block-style metadata", () => {
+    test("exposes every concrete style exactly once in canonical order", () => {
+        const commands = createCommandRegistry().listCommands();
+        const styleCommands = commands.filter((command) => command.blockStyle !== undefined);
+
+        expect(styleCommands.map(({ blockStyle }) => blockStyle)).toEqual(CONCRETE_BLOCK_STYLES);
+        expect(new Set(styleCommands.map(({ blockStyle }) => blockStyle)).size).toBe(CONCRETE_BLOCK_STYLES.length);
+        expect(styleCommands.every((command) => Object.isFrozen(command))).toBe(true);
+    });
+
+    test("does not attach block-style metadata to inline commands", () => {
+        const registry = createCommandRegistry();
+        const inlineCommandIds = [
+            EDITOR_COMMAND_IDS.bold,
+            EDITOR_COMMAND_IDS.italic,
+            EDITOR_COMMAND_IDS.strikethrough,
+            EDITOR_COMMAND_IDS.inlineCode,
+            EDITOR_COMMAND_IDS.link
+        ];
+
+        for (const commandId of inlineCommandIds) {
+            const command = registry.getCommand(commandId);
+            expect(command?.blockStyle).toBeUndefined();
+            expect(command && Object.hasOwn(command, "blockStyle")).toBe(false);
+        }
+    });
+
+    test("captures injected block-style metadata once when creating snapshots", () => {
+        let blockStyleReads = 0;
+        const sourceCommand: EditorCommand = {
+            id: "custom.style",
+            label: "Custom style",
+            get blockStyle() {
+                blockStyleReads += 1;
+                return blockStyleReads === 1 ? "heading2" : "taskList";
+            },
+            isAvailable: () => true,
+            execute: () => true
+        };
+        const registry = createCommandRegistry([sourceCommand]);
+
+        expect(registry.getCommand(sourceCommand.id)?.blockStyle).toBe("heading2");
+        expect(blockStyleReads).toBe(1);
+    });
+});
+
+describe("Command ID stability", () => {
+    test("keeps existing IDs stable and assigns line.text to Text", () => {
+        expect(EDITOR_COMMAND_IDS).toEqual({
+            blockquote: "line.blockquote",
+            bold: "format.bold",
+            codeBlock: "format.codeBlock",
+            bulletList: "line.bulletList",
+            heading1: "line.heading1",
+            heading2: "line.heading2",
+            heading3: "line.heading3",
+            heading4: "line.heading4",
+            heading5: "line.heading5",
+            heading6: "line.heading6",
+            inlineCode: "format.inlineCode",
+            italic: "format.italic",
+            link: "insert.link",
+            numberedList: "line.numberedList",
+            strikethrough: "format.strikethrough",
+            taskList: "line.taskList",
+            text: "line.text"
+        });
+    });
+});
+
+describe("Legacy command exports", () => {
+    test("keeps the fenced-code and line-prefix command entry points available", () => {
+        expect(toggleFencedCodeBlockCommand).toBeTypeOf("function");
+        expect(toggleLinePrefixCommand).toBeTypeOf("function");
     });
 });

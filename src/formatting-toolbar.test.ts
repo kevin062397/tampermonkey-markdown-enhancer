@@ -338,6 +338,7 @@ describe("Formatting toolbar", () => {
                 .filter(({ id }) => !PRIMARY_COMMAND_IDS.has(id))
                 .map(({ id }) => id)
         );
+        expect(overflowIds).toContain(EDITOR_COMMAND_IDS.text);
         expect(panel.hidden).toBe(true);
         expect(trigger.getAttribute("aria-expanded")).toBe("false");
 

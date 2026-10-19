@@ -1,11 +1,11 @@
+import { CONCRETE_BLOCK_STYLES, type ConcreteBlockStyle } from "./block-styles";
 import {
+    applyBlockStyleCommand,
     insertMarkdownLinkCommand,
-    toggleFencedCodeBlockCommand,
     toggleInlineCodeCommand,
-    toggleLinePrefixCommand,
     toggleWrapCommand
 } from "./commands";
-import type { BulletStyle, LinePrefixKind } from "./line-prefixes";
+import type { BulletStyle } from "./line-prefixes";
 import { DEFAULT_SHORTCUTS, type ShortcutOverrides } from "./settings";
 
 export const EDITOR_COMMAND_IDS = {
@@ -24,7 +24,8 @@ export const EDITOR_COMMAND_IDS = {
     link: "insert.link",
     numberedList: "line.numberedList",
     strikethrough: "format.strikethrough",
-    taskList: "line.taskList"
+    taskList: "line.taskList",
+    text: "line.text"
 } as const;
 
 export interface EditorCommandContext {
@@ -39,6 +40,7 @@ export interface CommandShortcut {
 export interface EditorCommand {
     readonly id: string;
     readonly label: string;
+    readonly blockStyle?: ConcreteBlockStyle;
     readonly shortcut?: CommandShortcut;
     readonly isAvailable: (context: EditorCommandContext) => boolean;
     readonly execute: (context: EditorCommandContext) => boolean;
@@ -73,9 +75,6 @@ const isFormattingAvailable = ({ textArea }: EditorCommandContext): boolean =>
 const isLineFormattingAvailable = ({ textArea }: EditorCommandContext): boolean =>
     !textArea.readOnly && !textArea.disabled;
 
-const isCodeBlockAvailable = ({ textArea }: EditorCommandContext): boolean =>
-    !textArea.readOnly && !textArea.disabled && textArea.selectionStart !== textArea.selectionEnd;
-
 const isCommandShortcutMatch = (command: EditorCommand, key: string, isPrimaryModifierPressed: boolean): boolean =>
     command.shortcut?.key.toLowerCase() === key.toLowerCase() &&
     command.shortcut.isPrimaryModifierRequired === isPrimaryModifierPressed;
@@ -93,30 +92,36 @@ const createFormattingCommand = (
     execute: ({ textArea }) => toggleWrapCommand(textArea, wrap)
 });
 
-const createLinePrefixCommand = (
-    id: string,
-    label: string,
-    kind: LinePrefixKind,
-    bulletStyle: BulletStyle
-): EditorCommand => ({
-    id,
-    label,
-    isAvailable: isLineFormattingAvailable,
-    execute: ({ textArea }) => toggleLinePrefixCommand(textArea, kind, bulletStyle)
-});
+const BLOCK_STYLE_COMMAND_METADATA: Readonly<
+    Record<ConcreteBlockStyle, { readonly id: string; readonly label: string }>
+> = {
+    text: { id: EDITOR_COMMAND_IDS.text, label: "Text" },
+    heading1: { id: EDITOR_COMMAND_IDS.heading1, label: "Heading 1" },
+    heading2: { id: EDITOR_COMMAND_IDS.heading2, label: "Heading 2" },
+    heading3: { id: EDITOR_COMMAND_IDS.heading3, label: "Heading 3" },
+    heading4: { id: EDITOR_COMMAND_IDS.heading4, label: "Heading 4" },
+    heading5: { id: EDITOR_COMMAND_IDS.heading5, label: "Heading 5" },
+    heading6: { id: EDITOR_COMMAND_IDS.heading6, label: "Heading 6" },
+    blockquote: { id: EDITOR_COMMAND_IDS.blockquote, label: "Blockquote" },
+    codeBlock: { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code block" },
+    bulletList: { id: EDITOR_COMMAND_IDS.bulletList, label: "Bullet list" },
+    numberedList: { id: EDITOR_COMMAND_IDS.numberedList, label: "Numbered list" },
+    taskList: { id: EDITOR_COMMAND_IDS.taskList, label: "Task list" }
+};
 
-const createLinePrefixCommands = (bulletStyle: BulletStyle): readonly EditorCommand[] => [
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading1, "Heading 1", "heading1", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading2, "Heading 2", "heading2", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading3, "Heading 3", "heading3", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading4, "Heading 4", "heading4", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading5, "Heading 5", "heading5", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.heading6, "Heading 6", "heading6", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.blockquote, "Blockquote", "blockquote", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.bulletList, "Bullet list", "bulletList", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.numberedList, "Numbered list", "numberedList", bulletStyle),
-    createLinePrefixCommand(EDITOR_COMMAND_IDS.taskList, "Task list", "taskList", bulletStyle)
-];
+const createBlockStyleCommand = (blockStyle: ConcreteBlockStyle, bulletStyle: BulletStyle): EditorCommand => {
+    const metadata = BLOCK_STYLE_COMMAND_METADATA[blockStyle];
+    return {
+        id: metadata.id,
+        label: metadata.label,
+        blockStyle,
+        isAvailable: isLineFormattingAvailable,
+        execute: ({ textArea }) => applyBlockStyleCommand(textArea, blockStyle, bulletStyle)
+    };
+};
+
+const createBlockStyleCommands = (bulletStyle: BulletStyle): readonly EditorCommand[] =>
+    CONCRETE_BLOCK_STYLES.map((blockStyle) => createBlockStyleCommand(blockStyle, bulletStyle));
 
 const createCoreCommands = (
     bulletStyle: BulletStyle,
@@ -137,30 +142,26 @@ const createCoreCommands = (
         execute: ({ textArea }) => toggleInlineCodeCommand(textArea)
     },
     {
-        id: EDITOR_COMMAND_IDS.codeBlock,
-        label: "Code block",
-        isAvailable: isCodeBlockAvailable,
-        execute: ({ textArea }) => toggleFencedCodeBlockCommand(textArea)
-    },
-    {
         id: EDITOR_COMMAND_IDS.link,
         label: "Link",
         shortcut: shortcutOverrides.link ?? DEFAULT_SHORTCUTS.link,
         isAvailable: isFormattingAvailable,
         execute: ({ textArea }) => insertMarkdownLinkCommand(textArea)
     },
-    ...createLinePrefixCommands(bulletStyle)
+    ...createBlockStyleCommands(bulletStyle)
 ];
 
 export const createCommandSnapshot = (command: EditorCommand): EditorCommand => {
     const id = command.id;
     const label = command.label;
+    const blockStyle = command.blockStyle;
     const shortcut = command.shortcut;
     const isAvailable = command.isAvailable;
     const execute = command.execute;
     return Object.freeze({
         id,
         label,
+        ...(blockStyle === undefined ? {} : { blockStyle }),
         shortcut: shortcut
             ? Object.freeze({
                   key: shortcut.key,

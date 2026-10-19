@@ -1,3 +1,4 @@
+import { applyBlockStyle, type ConcreteBlockStyle } from "./block-styles";
 import { toggleFencedCodeBlock, toggleInlineCode } from "./code-formatting";
 import { applyEditTransaction } from "./edit-transaction";
 import { readEditorState, type EditorTransform } from "./editor-state";
@@ -29,6 +30,12 @@ export const skipClosingPairCommand = (textArea: HTMLTextAreaElement, character:
 
 export const deleteEmptyPairCommand = (textArea: HTMLTextAreaElement): boolean =>
     executeTransform(textArea, deleteEmptyPair);
+
+export const applyBlockStyleCommand = (
+    textArea: HTMLTextAreaElement,
+    targetStyle: ConcreteBlockStyle,
+    bulletStyle: BulletStyle = "-"
+): boolean => executeTransform(textArea, (state) => applyBlockStyle(state, targetStyle, bulletStyle));
 
 export const wrapSelectionCommand = (textArea: HTMLTextAreaElement, leading: string, trailing: string): boolean =>
     executeTransform(textArea, (state) => wrapSelection(state, leading, trailing));
