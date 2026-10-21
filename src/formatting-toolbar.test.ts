@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { CONCRETE_BLOCK_STYLES } from "./block-styles";
+import { collectColorSchemeSignalElements } from "./color-scheme";
 import { createCommandRegistry, EDITOR_COMMAND_IDS, type EditorCommandRegistry } from "./command-registry";
 import {
     attachFormattingToolbar,
@@ -20,8 +21,10 @@ const TOOLBAR_SELECTOR = "[data-tampermonkey-markdown-enhancer-formatting-toolba
 interface ToolbarFixture {
     readonly registry: EditorCommandRegistry;
     readonly dispose: () => void;
+    readonly getResolverCallCount: () => number;
     readonly getToolbar: () => HTMLElement | null;
     readonly setEnabled: (isEnabled: boolean) => void;
+    readonly setRegistry: (registry: EditorCommandRegistry) => void;
 }
 
 const createTextArea = (placement: "before-editor" | "after-editor" = "after-editor"): HTMLTextAreaElement => {
@@ -57,9 +60,18 @@ const resolveFixtureEditor = (
 
 const createFixture = (registry: EditorCommandRegistry = createCommandRegistry()): ToolbarFixture => {
     let isEnabled = true;
+    let activeRegistry = registry;
+    let resolverCallCount = 0;
     const listeners = new Set<() => void>();
-    const resolveEditorFromTextArea = (textArea: HTMLTextAreaElement): FormattingToolbarEditor | null =>
-        resolveFixtureEditor(textArea, registry, isEnabled);
+    const notifySettings = (): void => {
+        for (const listener of listeners) {
+            listener();
+        }
+    };
+    const resolveEditorFromTextArea = (textArea: HTMLTextAreaElement): FormattingToolbarEditor | null => {
+        resolverCallCount += 1;
+        return resolveFixtureEditor(textArea, activeRegistry, isEnabled);
+    };
     const options: FormattingToolbarOptions = {
         resolveEditor: (event) => {
             const textArea = event
@@ -83,12 +95,15 @@ const createFixture = (registry: EditorCommandRegistry = createCommandRegistry()
     return {
         registry,
         dispose: attachFormattingToolbar(options),
+        getResolverCallCount: () => resolverCallCount,
         getToolbar: () => document.querySelector<HTMLElement>(TOOLBAR_SELECTOR),
         setEnabled: (isNextEnabled) => {
             isEnabled = isNextEnabled;
-            for (const listener of listeners) {
-                listener();
-            }
+            notifySettings();
+        },
+        setRegistry: (nextRegistry) => {
+            activeRegistry = nextRegistry;
+            notifySettings();
         }
     };
 };
@@ -195,6 +210,12 @@ const openMorePanel = (toolbar: HTMLElement): HTMLElement => {
 const getPointerListenerCalls = (calls: readonly (readonly unknown[])[]): ReadonlyArray<readonly unknown[]> =>
     calls.filter(([type]) => type === "pointerdown");
 
+const getStyleSheetLoadListenerCalls = (calls: readonly (readonly unknown[])[]): ReadonlyArray<readonly unknown[]> =>
+    calls.filter(([type, , options]) => type === "load" && options === true);
+
+const getSlotChangeListenerCalls = (calls: readonly (readonly unknown[])[]): ReadonlyArray<readonly unknown[]> =>
+    calls.filter(([type]) => type === "slotchange");
+
 const TOOLBAR_DOCUMENT_EVENT_TYPES = ["focusin", "selectionchange", "input", "select", "keyup", "keydown"] as const;
 const TOOLBAR_ACTIVE_EVENT_TYPES = TOOLBAR_DOCUMENT_EVENT_TYPES.slice(1);
 
@@ -207,6 +228,161 @@ const getToolbarDocumentListenerTypes = (calls: readonly (readonly unknown[])[])
 
 const flushMutationObserver = async (): Promise<void> => {
     await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+const calculateRelativeLuminance = (hexColor: string): number => {
+    const channels = hexColor
+        .slice(1)
+        .match(/.{2}/g)
+        ?.map((channel) => Number.parseInt(channel, 16) / 255);
+    if (!channels || channels.length !== 3) {
+        throw new Error(`Expected six-digit hex color, received ${hexColor}`);
+    }
+    const [red, green, blue] = channels.map((channel) =>
+        channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+    );
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+};
+
+const calculateContrastRatio = (firstColor: string, secondColor: string): number => {
+    const firstLuminance = calculateRelativeLuminance(firstColor);
+    const secondLuminance = calculateRelativeLuminance(secondColor);
+    const lighterLuminance = Math.max(firstLuminance, secondLuminance);
+    const darkerLuminance = Math.min(firstLuminance, secondLuminance);
+    return (lighterLuminance + 0.05) / (darkerLuminance + 0.05);
+};
+
+const readColorTokens = (css: string, scheme: "light" | "dark"): ReadonlyMap<string, string> => {
+    const blockMarker = `[data-tampermonkey-markdown-enhancer-color-scheme="${scheme}"] {`;
+    const blockStart = css.indexOf(blockMarker);
+    const blockEnd = css.indexOf("}", blockStart);
+    if (blockStart < 0 || blockEnd < 0) {
+        throw new Error(`Missing ${scheme} color-scheme block`);
+    }
+    return new Map(
+        Array.from(
+            css.slice(blockStart, blockEnd).matchAll(/(--tme-[\w-]+):\s*(#[\da-f]{6});/gi),
+            ([, name, value]) => [name, value.toLowerCase()]
+        )
+    );
+};
+
+const getColorToken = (tokens: ReadonlyMap<string, string>, tokenName: string): string => {
+    const color = tokens.get(tokenName);
+    if (!color) {
+        throw new Error(`Missing color token ${tokenName}`);
+    }
+    return color;
+};
+
+interface MediaPreferenceFixture {
+    readonly addEventListener: ReturnType<typeof vi.fn>;
+    readonly addListener: ReturnType<typeof vi.fn>;
+    readonly matchMedia: ReturnType<typeof vi.fn>;
+    readonly mediaQueryList: MediaQueryList;
+    readonly removeEventListener: ReturnType<typeof vi.fn>;
+    readonly removeListener: ReturnType<typeof vi.fn>;
+    readonly restore: () => void;
+    readonly setMatches: (isMatched: boolean) => void;
+}
+
+interface MediaPreferenceFixtureOptions {
+    readonly getIsLegacyAddThrowing?: () => boolean;
+    readonly getIsLegacyRemoveThrowing?: () => boolean;
+    readonly getIsModernAddThrowing?: () => boolean;
+    readonly getIsModernRemoveThrowing?: () => boolean;
+    readonly isLegacyAddMutatingBeforeThrow?: boolean;
+    readonly isLegacyAddThrowing?: boolean;
+    readonly isLegacyRemoveThrowing?: boolean;
+    readonly isLegacyRemoveUnavailable?: boolean;
+    readonly isModernAddMutatingBeforeThrow?: boolean;
+    readonly isModernAddThrowing?: boolean;
+    readonly isModernRemoveThrowing?: boolean;
+    readonly isModernRemoveUnavailable?: boolean;
+}
+
+const createMediaPreferenceFixture = (
+    ownerWindow: Window,
+    isInitiallyMatched: boolean,
+    options: MediaPreferenceFixtureOptions = {}
+): MediaPreferenceFixture => {
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    const originalDescriptor = Object.getOwnPropertyDescriptor(ownerWindow, "matchMedia");
+    const state = { isMatched: isInitiallyMatched };
+    const addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        const isChangeListener = type === "change" && typeof listener === "function";
+        const isAddThrowing = options.isModernAddThrowing || options.getIsModernAddThrowing?.() === true;
+        if (isChangeListener && (!isAddThrowing || options.isModernAddMutatingBeforeThrow)) {
+            listeners.add(listener as (event: MediaQueryListEvent) => void);
+        }
+        if (isAddThrowing) {
+            throw new Error("modern add failed");
+        }
+    });
+    const removeEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        const isRemoveThrowing = options.isModernRemoveThrowing || options.getIsModernRemoveThrowing?.() === true;
+        if (isRemoveThrowing) {
+            throw new Error("modern remove failed");
+        }
+        if (type === "change" && typeof listener === "function") {
+            listeners.delete(listener as (event: MediaQueryListEvent) => void);
+        }
+    });
+    const addListener = vi.fn((listener: (event: MediaQueryListEvent) => void) => {
+        const isAddThrowing = options.isLegacyAddThrowing || options.getIsLegacyAddThrowing?.() === true;
+        if (!isAddThrowing || options.isLegacyAddMutatingBeforeThrow) {
+            listeners.add(listener);
+        }
+        if (isAddThrowing) {
+            throw new Error("legacy add failed");
+        }
+    });
+    const removeListener = vi.fn((listener: (event: MediaQueryListEvent) => void) => {
+        const isRemoveThrowing = options.isLegacyRemoveThrowing || options.getIsLegacyRemoveThrowing?.() === true;
+        if (isRemoveThrowing) {
+            throw new Error("legacy remove failed");
+        }
+        listeners.delete(listener);
+    });
+    const mediaQueryList = {
+        addEventListener,
+        addListener,
+        dispatchEvent: vi.fn(),
+        get matches() {
+            return state.isMatched;
+        },
+        media: "(prefers-color-scheme: dark)",
+        onchange: null,
+        removeEventListener: options.isModernRemoveUnavailable ? undefined : removeEventListener,
+        removeListener: options.isLegacyRemoveUnavailable ? undefined : removeListener
+    } as unknown as MediaQueryList;
+    const matchMedia = vi.fn(() => mediaQueryList);
+    Object.defineProperty(ownerWindow, "matchMedia", {
+        configurable: true,
+        value: matchMedia
+    });
+    return {
+        addEventListener,
+        addListener,
+        matchMedia,
+        mediaQueryList,
+        removeEventListener,
+        removeListener,
+        restore: () => {
+            if (originalDescriptor) {
+                Object.defineProperty(ownerWindow, "matchMedia", originalDescriptor);
+            } else {
+                Reflect.deleteProperty(ownerWindow, "matchMedia");
+            }
+        },
+        setMatches: (isMatched) => {
+            state.isMatched = isMatched;
+            const event = { matches: isMatched, media: mediaQueryList.media } as MediaQueryListEvent;
+            for (const listener of listeners) {
+                listener(event);
+            }
+        }
+    };
 };
 
 const getCommandButton = (toolbar: HTMLElement, commandId: string): HTMLButtonElement => {
@@ -398,6 +574,33 @@ describe("Formatting toolbar", () => {
         textArea.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "n" }));
         await Promise.resolve();
         expect(boldButton.disabled).toBe(false);
+    });
+
+    test("keeps observer registrations stable for same-editor state events", async () => {
+        const observeMutation = vi.spyOn(MutationObserver.prototype, "observe");
+        const disconnectMutation = vi.spyOn(MutationObserver.prototype, "disconnect");
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        await flushMutationObserver();
+        const observeCallCount = observeMutation.mock.calls.length;
+        const disconnectCallCount = disconnectMutation.mock.calls.length;
+
+        textArea.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        textArea.dispatchEvent(new Event("select", { bubbles: true }));
+        textArea.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "e" }));
+        document.dispatchEvent(new Event("selectionchange"));
+        await Promise.resolve();
+
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(observeMutation.mock.calls).toHaveLength(observeCallCount);
+        expect(disconnectMutation.mock.calls).toHaveLength(disconnectCallCount);
     });
 
     test("refreshes the Style presentation for editor state events, mixed selections, and blanks", async () => {
@@ -842,6 +1045,1123 @@ describe("Formatting toolbar", () => {
         expect(secondChange).not.toHaveBeenCalled();
     });
 
+    test("updates media fallback without remounting or disturbing menu, focus, and selection", () => {
+        const media = createMediaPreferenceFixture(window, false);
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+            textArea.value = "# Heading";
+            textArea.setSelectionRange(0, textArea.value.length, "backward");
+            textArea.focus();
+            const toolbar = fixture.getToolbar();
+            if (!toolbar) {
+                throw new Error("Expected toolbar");
+            }
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+            expect(media.addEventListener).toHaveBeenCalledOnce();
+
+            const panel = openStylePanel(toolbar);
+            const focusedRow = panel.querySelector<HTMLButtonElement>('button[data-block-style="heading2"]');
+            if (!focusedRow) {
+                throw new Error("Expected style row");
+            }
+            focusedRow.focus();
+            const selection = [textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection];
+
+            media.setMatches(true);
+
+            expect(fixture.getToolbar()).toBe(toolbar);
+            expect(getStylePanel(toolbar)).toBe(panel);
+            expect(panel.hidden).toBe(false);
+            expect(document.activeElement).toBe(focusedRow);
+            expect([textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection]).toEqual(selection);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+            expect(media.addEventListener).toHaveBeenCalledOnce();
+
+            media.setMatches(false);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+            fixture.dispose();
+            fixture = undefined;
+            expect(media.removeEventListener).toHaveBeenCalledOnce();
+            expect(media.removeEventListener.mock.calls[0]?.[1]).toBe(media.addEventListener.mock.calls[0]?.[1]);
+            expect(media.addListener).not.toHaveBeenCalled();
+            expect(media.removeListener).not.toHaveBeenCalled();
+            media.setMatches(true);
+            expect(toolbar.isConnected).toBe(false);
+        } finally {
+            media.restore();
+        }
+    });
+
+    test("cleans a partially added modern media listener before registering the legacy fallback", () => {
+        const media = createMediaPreferenceFixture(window, false, {
+            isModernAddMutatingBeforeThrow: true,
+            isModernAddThrowing: true
+        });
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+            expect(() => textArea.focus()).not.toThrow();
+            const toolbar = fixture.getToolbar();
+            if (!toolbar) {
+                throw new Error("Expected toolbar");
+            }
+
+            expect(media.addEventListener).toHaveBeenCalledOnce();
+            expect(media.removeEventListener).toHaveBeenCalledOnce();
+            expect(media.removeEventListener.mock.calls[0]?.[1]).toBe(media.addEventListener.mock.calls[0]?.[1]);
+            expect(media.addListener).toHaveBeenCalledOnce();
+            expect(media.removeEventListener.mock.invocationCallOrder[0]).toBeLessThan(
+                media.addListener.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+            );
+            media.setMatches(true);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+
+            fixture.dispose();
+            fixture = undefined;
+            expect(media.removeEventListener).toHaveBeenCalledOnce();
+            expect(media.removeListener).toHaveBeenCalledOnce();
+            expect(media.removeListener.mock.calls[0]?.[0]).toBe(media.addListener.mock.calls[0]?.[0]);
+        } finally {
+            media.restore();
+        }
+    });
+
+    test("uses the complete legacy media pair when modern removal is unavailable", () => {
+        const media = createMediaPreferenceFixture(window, false, { isModernRemoveUnavailable: true });
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+            expect(() => textArea.focus()).not.toThrow();
+
+            expect(media.addEventListener).not.toHaveBeenCalled();
+            expect(media.addListener).toHaveBeenCalledOnce();
+            fixture.dispose();
+            fixture = undefined;
+            expect(media.removeEventListener).not.toHaveBeenCalled();
+            expect(media.removeListener).toHaveBeenCalledOnce();
+            expect(media.removeListener.mock.calls[0]?.[0]).toBe(media.addListener.mock.calls[0]?.[0]);
+        } finally {
+            media.restore();
+        }
+    });
+
+    test("does not register a media listener when neither API has a complete pair", () => {
+        const media = createMediaPreferenceFixture(window, true, {
+            isLegacyRemoveUnavailable: true,
+            isModernRemoveUnavailable: true
+        });
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+
+            expect(() => textArea.focus()).not.toThrow();
+            expect(fixture.getToolbar()?.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+            expect(media.addEventListener).not.toHaveBeenCalled();
+            expect(media.addListener).not.toHaveBeenCalled();
+            expect(() => fixture?.dispose()).not.toThrow();
+            fixture = undefined;
+        } finally {
+            media.restore();
+        }
+    });
+
+    test("cleans partial media registrations when both listener APIs throw", () => {
+        const media = createMediaPreferenceFixture(window, true, {
+            isLegacyAddMutatingBeforeThrow: true,
+            isLegacyAddThrowing: true,
+            isModernAddMutatingBeforeThrow: true,
+            isModernAddThrowing: true
+        });
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+
+            expect(() => textArea.focus()).not.toThrow();
+            expect(fixture.getToolbar()?.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+            expect(media.addEventListener).toHaveBeenCalledOnce();
+            expect(media.addListener).toHaveBeenCalledOnce();
+            expect(media.removeEventListener).toHaveBeenCalledOnce();
+            expect(media.removeEventListener.mock.calls[0]?.[1]).toBe(media.addEventListener.mock.calls[0]?.[1]);
+            expect(media.removeListener).toHaveBeenCalledOnce();
+            expect(media.removeListener.mock.calls[0]?.[0]).toBe(media.addListener.mock.calls[0]?.[0]);
+            media.setMatches(false);
+            expect(fixture.getToolbar()?.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+            expect(() => fixture?.dispose()).not.toThrow();
+            fixture = undefined;
+            expect(media.removeEventListener).toHaveBeenCalledOnce();
+            expect(media.removeListener).toHaveBeenCalledOnce();
+        } finally {
+            media.restore();
+        }
+    });
+
+    test("continues to the legacy media API when partial modern cleanup throws", () => {
+        const media = createMediaPreferenceFixture(window, false, {
+            isModernAddMutatingBeforeThrow: true,
+            isModernAddThrowing: true,
+            isModernRemoveThrowing: true
+        });
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+
+            expect(() => textArea.focus()).not.toThrow();
+            expect(media.addEventListener).toHaveBeenCalledOnce();
+            expect(media.removeEventListener).toHaveBeenCalledTimes(2);
+            expect(media.addListener).toHaveBeenCalledOnce();
+            media.setMatches(true);
+            expect(fixture.getToolbar()?.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+            expect(() => fixture?.dispose()).not.toThrow();
+            fixture = undefined;
+            expect(media.removeListener).toHaveBeenCalledOnce();
+        } finally {
+            media.restore();
+        }
+    });
+
+    test("retries failed media listener registration on the identical query object", () => {
+        let isRegistrationFailing = true;
+        const media = createMediaPreferenceFixture(window, true, {
+            getIsLegacyAddThrowing: () => isRegistrationFailing,
+            getIsModernAddThrowing: () => isRegistrationFailing
+        });
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+            textArea.focus();
+            const toolbar = fixture.getToolbar();
+            if (!toolbar) {
+                throw new Error("Expected toolbar");
+            }
+
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+            expect(media.matchMedia).toHaveBeenCalledOnce();
+            expect(media.addEventListener).toHaveBeenCalledOnce();
+            expect(media.addListener).toHaveBeenCalledOnce();
+            isRegistrationFailing = false;
+
+            textArea.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+            expect(media.matchMedia).toHaveBeenCalledOnce();
+            expect(media.addEventListener).toHaveBeenCalledTimes(2);
+            expect(media.addListener).toHaveBeenCalledOnce();
+            media.setMatches(false);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+        } finally {
+            media.restore();
+        }
+    });
+
+    test.each(["modern", "legacy"] as const)(
+        "retries one transient %s media listener removal and clears the registration state",
+        (mode) => {
+            let removalAttemptCount = 0;
+            const media = createMediaPreferenceFixture(
+                window,
+                false,
+                mode === "modern"
+                    ? { getIsModernRemoveThrowing: () => removalAttemptCount++ === 0 }
+                    : {
+                          getIsLegacyRemoveThrowing: () => removalAttemptCount++ === 0,
+                          isModernAddThrowing: true
+                      }
+            );
+            try {
+                fixture = createFixture();
+                const textArea = createTextArea();
+                textArea.focus();
+                const toolbar = fixture.getToolbar();
+                if (!toolbar) {
+                    throw new Error("Expected toolbar");
+                }
+                const registeredCallback =
+                    mode === "modern"
+                        ? media.addEventListener.mock.calls[0]?.[1]
+                        : media.addListener.mock.calls[0]?.[0];
+                const dispose = fixture.dispose;
+
+                expect(() => dispose()).not.toThrow();
+                fixture = undefined;
+                expect(toolbar.isConnected).toBe(false);
+                const removalCalls =
+                    mode === "modern" ? media.removeEventListener.mock.calls : media.removeListener.mock.calls;
+                expect(removalCalls).toHaveLength(2);
+                expect(removalCalls[0]?.at(-1)).toBe(registeredCallback);
+                expect(removalCalls[1]?.at(-1)).toBe(registeredCallback);
+                expect(() => dispose()).not.toThrow();
+                expect(removalCalls).toHaveLength(2);
+                media.setMatches(true);
+                expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+            } finally {
+                media.restore();
+            }
+        }
+    );
+
+    test.each(["modern", "legacy"] as const)(
+        "bounds persistent %s media listener removal failures while completing disposal",
+        (mode) => {
+            const media = createMediaPreferenceFixture(
+                window,
+                false,
+                mode === "modern"
+                    ? { isModernRemoveThrowing: true }
+                    : { isLegacyRemoveThrowing: true, isModernAddThrowing: true }
+            );
+            try {
+                fixture = createFixture();
+                const textArea = createTextArea();
+                textArea.focus();
+                const toolbar = fixture.getToolbar();
+                if (!toolbar) {
+                    throw new Error("Expected toolbar");
+                }
+                const dispose = fixture.dispose;
+
+                expect(() => dispose()).not.toThrow();
+                fixture = undefined;
+                expect(toolbar.isConnected).toBe(false);
+                const removalCalls =
+                    mode === "modern" ? media.removeEventListener.mock.calls : media.removeListener.mock.calls;
+                expect(removalCalls).toHaveLength(2);
+                expect(() => dispose()).not.toThrow();
+                expect(removalCalls).toHaveLength(2);
+                media.setMatches(true);
+                expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+            } finally {
+                media.restore();
+            }
+        }
+    );
+
+    test("updates exact computed schemes after ancestor class and style changes", async () => {
+        const scope = document.createElement("section");
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        scope.append(textArea);
+        document.body.append(scope);
+        vi.spyOn(window, "getComputedStyle").mockImplementation(
+            () =>
+                ({
+                    colorScheme: scope.classList.contains("dark-scope")
+                        ? "dark"
+                        : scope.style.colorScheme === "only light"
+                          ? "only light"
+                          : scope.dataset.palette === "dark"
+                            ? "only dark"
+                            : "normal"
+                }) as CSSStyleDeclaration
+        );
+        fixture = createFixture();
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        scope.classList.add("dark-scope");
+        await flushMutationObserver();
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+
+        scope.classList.remove("dark-scope");
+        scope.style.colorScheme = "only light";
+        await flushMutationObserver();
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        scope.style.removeProperty("color-scheme");
+        scope.dataset.palette = "dark";
+        await flushMutationObserver();
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+    });
+
+    test("updates nearest ancestor and open Shadow host theme attributes in place", async () => {
+        vi.spyOn(window, "getComputedStyle").mockReturnValue({ colorScheme: "normal" } as CSSStyleDeclaration);
+        fixture = createFixture();
+        const outer = document.createElement("main");
+        outer.dataset.theme = "dark";
+        const host = document.createElement("article");
+        host.dataset.theme = "dark";
+        host.dataset.colorMode = "light";
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const scope = document.createElement("section");
+        scope.dataset.bsTheme = "LIGHT";
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        scope.append(textArea);
+        shadowRoot.append(scope);
+        outer.append(host);
+        document.body.append(outer);
+        textArea.focus();
+        const toolbar = shadowRoot.querySelector<HTMLElement>(TOOLBAR_SELECTOR);
+        if (!toolbar) {
+            throw new Error("Expected ShadowRoot toolbar");
+        }
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        scope.removeAttribute("data-bs-theme");
+        await flushMutationObserver();
+        expect(shadowRoot.querySelector(TOOLBAR_SELECTOR)).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+
+        host.dataset.theme = "custom";
+        await flushMutationObserver();
+        expect(shadowRoot.querySelector(TOOLBAR_SELECTOR)).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+    });
+
+    test("updates computed schemes for stylesheet mutations without full reconciliation", async () => {
+        let computedColorScheme = "light";
+        const getComputedStyle = vi
+            .spyOn(window, "getComputedStyle")
+            .mockImplementation(() => ({ colorScheme: computedColorScheme }) as CSSStyleDeclaration);
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        textArea.blur();
+        await flushMutationObserver();
+        const resolverCallCount = fixture.getResolverCallCount();
+        const expectSchemeAfterMutation = async (
+            nextScheme: "light" | "dark",
+            mutateStyleSheet: () => void
+        ): Promise<void> => {
+            computedColorScheme = nextScheme;
+            mutateStyleSheet();
+            await flushMutationObserver();
+            expect(fixture?.getToolbar()).toBe(toolbar);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe(nextScheme);
+            expect(fixture?.getResolverCallCount()).toBe(resolverCallCount);
+        };
+
+        const style = document.createElement("style");
+        style.textContent = ":root { color-scheme: dark; }";
+        await expectSchemeAfterMutation("dark", () => document.head.append(style));
+        await expectSchemeAfterMutation("light", () => {
+            const textNode = style.firstChild;
+            if (!textNode) {
+                throw new Error("Expected style text node");
+            }
+            textNode.nodeValue = ":root { color-scheme: light; }";
+        });
+        await expectSchemeAfterMutation("dark", () => {
+            style.textContent = ":root { color-scheme: dark; }";
+        });
+        await expectSchemeAfterMutation("light", () => style.setAttribute("media", "screen"));
+        await expectSchemeAfterMutation("dark", () => style.setAttribute("disabled", ""));
+        await expectSchemeAfterMutation("light", () => style.remove());
+
+        const refreshCallCountBeforePreload = getComputedStyle.mock.calls.length;
+        const preload = document.createElement("link");
+        preload.rel = "preload";
+        preload.href = "/theme.css";
+        computedColorScheme = "dark";
+        document.head.append(preload);
+        await flushMutationObserver();
+        preload.href = "/other.css";
+        await flushMutationObserver();
+        preload.media = "screen";
+        await flushMutationObserver();
+        preload.toggleAttribute("disabled", true);
+        await flushMutationObserver();
+        preload.remove();
+        await flushMutationObserver();
+        expect(getComputedStyle.mock.calls).toHaveLength(refreshCallCountBeforePreload);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        const preloadWrapper = document.createElement("div");
+        const nestedPreload = document.createElement("link");
+        nestedPreload.rel = "preload";
+        preloadWrapper.append(nestedPreload);
+        document.head.append(preloadWrapper);
+        await flushMutationObserver();
+        preloadWrapper.remove();
+        await flushMutationObserver();
+        expect(getComputedStyle.mock.calls).toHaveLength(refreshCallCountBeforePreload);
+
+        const link = document.createElement("link");
+        link.rel = "preload";
+        link.href = "/theme.css";
+        document.head.append(link);
+        await flushMutationObserver();
+        await expectSchemeAfterMutation("dark", () => link.setAttribute("rel", "stylesheet"));
+        await expectSchemeAfterMutation("light", () => link.setAttribute("href", "/light.css"));
+        await expectSchemeAfterMutation("dark", () => link.setAttribute("media", "screen"));
+        await expectSchemeAfterMutation("light", () => link.setAttribute("disabled", ""));
+        await expectSchemeAfterMutation("dark", () => link.setAttribute("rel", "preload"));
+        const refreshCallCountAfterRelRemoval = getComputedStyle.mock.calls.length;
+        computedColorScheme = "light";
+        link.remove();
+        await flushMutationObserver();
+        expect(getComputedStyle.mock.calls).toHaveLength(refreshCallCountAfterRelRemoval);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+
+        const removedStyleSheet = document.createElement("link");
+        removedStyleSheet.rel = "alternate stylesheet";
+        document.head.append(removedStyleSheet);
+        await flushMutationObserver();
+        await expectSchemeAfterMutation("light", () => removedStyleSheet.remove());
+
+        const refreshCallCount = getComputedStyle.mock.calls.length;
+        style.title = "unrelated";
+        document.body.append(document.createElement("span"));
+        await flushMutationObserver();
+        expect(getComputedStyle.mock.calls).toHaveLength(refreshCallCount);
+        expect(fixture.getResolverCallCount()).toBe(resolverCallCount);
+    });
+
+    test("refreshes computed scheme on captured stylesheet link loads without editor reconciliation", async () => {
+        let computedColorScheme = "light";
+        vi.spyOn(window, "getComputedStyle").mockImplementation(
+            () => ({ colorScheme: computedColorScheme }) as CSSStyleDeclaration
+        );
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        await flushMutationObserver();
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        document.head.append(link);
+        await flushMutationObserver();
+        const resolverCallCountAfterInsertion = fixture.getResolverCallCount();
+
+        computedColorScheme = "dark";
+        link.dispatchEvent(new Event("load"));
+
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+        expect(fixture.getResolverCallCount()).toBe(resolverCallCountAfterInsertion);
+
+        const preload = document.createElement("link");
+        preload.rel = "preload";
+        document.head.append(preload);
+        await flushMutationObserver();
+        const resolverCallCountBeforePreload = fixture.getResolverCallCount();
+        computedColorScheme = "light";
+        preload.dispatchEvent(new Event("load"));
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+        expect(fixture.getResolverCallCount()).toBe(resolverCallCountBeforePreload);
+    });
+
+    test("captures stylesheet link loads from an active open shadow root", () => {
+        let computedColorScheme = "light";
+        vi.spyOn(window, "getComputedStyle").mockImplementation(
+            () => ({ colorScheme: computedColorScheme }) as CSSStyleDeclaration
+        );
+        fixture = createFixture();
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const addRootListener = vi.spyOn(shadowRoot, "addEventListener");
+        const removeRootListener = vi.spyOn(shadowRoot, "removeEventListener");
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        shadowRoot.append(textArea);
+        document.body.append(host);
+        textArea.focus();
+        const toolbar = shadowRoot.querySelector<HTMLElement>(TOOLBAR_SELECTOR);
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        const loadListenerCalls = getStyleSheetLoadListenerCalls(addRootListener.mock.calls);
+        expect(loadListenerCalls).toHaveLength(1);
+
+        const link = document.createElement("link");
+        link.rel = "alternate STYLESHEET";
+        shadowRoot.append(link);
+        computedColorScheme = "dark";
+        link.dispatchEvent(new Event("load"));
+
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+        fixture.dispose();
+        fixture = undefined;
+        const removeLoadCalls = getStyleSheetLoadListenerCalls(removeRootListener.mock.calls);
+        expect(removeLoadCalls).toHaveLength(1);
+        expect(removeLoadCalls[0]?.[1]).toBe(loadListenerCalls[0]?.[1]);
+    });
+
+    test("removes exact stylesheet load listeners on inactivity, relocation, and disposal", async () => {
+        const addInitialListener = vi.spyOn(document, "addEventListener");
+        const removeInitialListener = vi.spyOn(document, "removeEventListener");
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        const initialAddCalls = getStyleSheetLoadListenerCalls(addInitialListener.mock.calls);
+        expect(initialAddCalls).toHaveLength(1);
+        const initialCallback = initialAddCalls[0]?.[1];
+
+        fixture.setEnabled(false);
+        const inactiveRemoveCalls = getStyleSheetLoadListenerCalls(removeInitialListener.mock.calls);
+        expect(inactiveRemoveCalls).toHaveLength(1);
+        expect(inactiveRemoveCalls[0]?.[1]).toBe(initialCallback);
+
+        fixture.setEnabled(true);
+        textArea.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        const reactivatedAddCalls = getStyleSheetLoadListenerCalls(addInitialListener.mock.calls);
+        expect(reactivatedAddCalls).toHaveLength(2);
+        expect(reactivatedAddCalls[1]?.[1]).toBe(initialCallback);
+
+        const frame = document.createElement("iframe");
+        document.body.append(frame);
+        const destinationDocument = frame.contentDocument;
+        if (!destinationDocument) {
+            throw new Error("Expected destination document");
+        }
+        const addDestinationListener = vi.spyOn(destinationDocument, "addEventListener");
+        const removeDestinationListener = vi.spyOn(destinationDocument, "removeEventListener");
+        destinationDocument.body.append(textArea, toolbar);
+        await flushMutationObserver();
+
+        const relocatedRemoveCalls = getStyleSheetLoadListenerCalls(removeInitialListener.mock.calls);
+        const destinationAddCalls = getStyleSheetLoadListenerCalls(addDestinationListener.mock.calls);
+        expect(relocatedRemoveCalls).toHaveLength(2);
+        expect(relocatedRemoveCalls[1]?.[1]).toBe(initialCallback);
+        expect(destinationAddCalls).toHaveLength(1);
+        expect(destinationAddCalls[0]?.[1]).toBe(initialCallback);
+
+        fixture.dispose();
+        fixture = undefined;
+        const destinationRemoveCalls = getStyleSheetLoadListenerCalls(removeDestinationListener.mock.calls);
+        expect(destinationRemoveCalls).toHaveLength(1);
+        expect(destinationRemoveCalls[0]?.[1]).toBe(initialCallback);
+        expect(toolbar.isConnected).toBe(false);
+    });
+
+    test("places and synchronizes the toolbar in the textarea named slot", async () => {
+        vi.spyOn(window, "getComputedStyle").mockReturnValue({ colorScheme: "normal" } as CSSStyleDeclaration);
+        fixture = createFixture();
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const darkSlot = document.createElement("slot");
+        darkSlot.name = "editor";
+        darkSlot.dataset.theme = "dark";
+        const lightSlot = document.createElement("slot");
+        lightSlot.name = "other";
+        lightSlot.dataset.theme = "light";
+        shadowRoot.append(darkSlot, lightSlot);
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        textArea.slot = "editor";
+        host.append(textArea);
+        document.body.append(host);
+
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        expect(textArea.assignedSlot).toBe(darkSlot);
+        expect(toolbar.slot).toBe("editor");
+        expect(toolbar.assignedSlot).toBe(textArea.assignedSlot);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+
+        textArea.slot = "other";
+        await flushMutationObserver();
+
+        expect(textArea.assignedSlot).toBe(lightSlot);
+        expect(toolbar.slot).toBe("other");
+        expect(toolbar.assignedSlot).toBe(textArea.assignedSlot);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+    });
+
+    test("refreshes scheme signals for slot attributes when composed scope identities stay unchanged", async () => {
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const slot = document.createElement("slot");
+        const wrapper = document.createElement("div");
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        wrapper.append(textArea);
+        host.append(wrapper);
+        shadowRoot.append(slot);
+        document.body.append(host);
+        vi.spyOn(window, "getComputedStyle").mockImplementation(
+            () =>
+                ({
+                    colorScheme: textArea.hasAttribute("slot") || wrapper.hasAttribute("slot") ? "dark" : "light"
+                }) as CSSStyleDeclaration
+        );
+        fixture = createFixture();
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        const initialSignalElements = collectColorSchemeSignalElements(textArea);
+        expect(wrapper.assignedSlot).toBe(slot);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        textArea.setAttribute("slot", "nested-editor");
+        await flushMutationObserver();
+        expect(collectColorSchemeSignalElements(textArea)).toEqual(initialSignalElements);
+        expect(wrapper.assignedSlot).toBe(slot);
+        expect(toolbar.slot).toBe("nested-editor");
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+
+        textArea.removeAttribute("slot");
+        await flushMutationObserver();
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        wrapper.setAttribute("slot", "");
+        await flushMutationObserver();
+        expect(collectColorSchemeSignalElements(textArea)).toEqual(initialSignalElements);
+        expect(wrapper.assignedSlot).toBe(slot);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+    });
+
+    test("updates assigned-slot theme scope without remounting or disturbing focus and selection", async () => {
+        vi.spyOn(window, "getComputedStyle").mockReturnValue({ colorScheme: "normal" } as CSSStyleDeclaration);
+        const observeMutation = vi.spyOn(MutationObserver.prototype, "observe");
+        fixture = createFixture();
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const darkSlot = document.createElement("slot");
+        darkSlot.name = "editor";
+        darkSlot.dataset.theme = "dark";
+        const lightSlot = document.createElement("slot");
+        lightSlot.name = "other";
+        lightSlot.dataset.theme = "light";
+        shadowRoot.append(darkSlot, lightSlot);
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        textArea.slot = "editor";
+        textArea.value = "# Heading";
+        textArea.setSelectionRange(0, textArea.value.length, "backward");
+        host.append(textArea);
+        document.body.append(host);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+        expect(
+            observeMutation.mock.calls.some(
+                ([target, options]) =>
+                    target === textArea && (options as MutationObserverInit).attributeFilter?.join(",") === "slot"
+            )
+        ).toBe(true);
+        expect(
+            observeMutation.mock.calls.some(
+                ([target, options]) =>
+                    target === shadowRoot &&
+                    (options as MutationObserverInit).subtree === true &&
+                    (options as MutationObserverInit).attributeFilter?.join(",") === "name"
+            )
+        ).toBe(true);
+
+        const panel = openStylePanel(toolbar);
+        const focusedRow = panel.querySelector<HTMLButtonElement>('button[data-block-style="heading2"]');
+        if (!focusedRow) {
+            throw new Error("Expected style row");
+        }
+        focusedRow.focus();
+        const selection = [textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection];
+
+        textArea.slot = "other";
+        await flushMutationObserver();
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(getStylePanel(toolbar)).toBe(panel);
+        expect(document.activeElement).toBe(focusedRow);
+        expect([textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection]).toEqual(selection);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        darkSlot.name = "other";
+        lightSlot.name = "editor";
+        await flushMutationObserver();
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(document.activeElement).toBe(focusedRow);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+    });
+
+    test("updates an assigned ancestor slot scope without replacing toolbar state", async () => {
+        vi.spyOn(window, "getComputedStyle").mockReturnValue({ colorScheme: "normal" } as CSSStyleDeclaration);
+        const observeMutation = vi.spyOn(MutationObserver.prototype, "observe");
+        fixture = createFixture();
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const darkSlot = document.createElement("slot");
+        darkSlot.name = "dark";
+        darkSlot.dataset.theme = "dark";
+        const lightSlot = document.createElement("slot");
+        lightSlot.name = "light";
+        lightSlot.dataset.theme = "light";
+        shadowRoot.append(darkSlot, lightSlot);
+        const wrapper = document.createElement("div");
+        wrapper.slot = "dark";
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        textArea.value = "# Heading";
+        textArea.setSelectionRange(0, textArea.value.length, "backward");
+        wrapper.append(textArea);
+        host.append(wrapper);
+        document.body.append(host);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        expect(wrapper.assignedSlot).toBe(darkSlot);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+        expect(
+            observeMutation.mock.calls.some(
+                ([target, options]) =>
+                    target === wrapper && (options as MutationObserverInit).attributeFilter?.join(",") === "slot"
+            )
+        ).toBe(true);
+
+        const panel = openStylePanel(toolbar);
+        const focusedRow = panel.querySelector<HTMLButtonElement>('button[data-block-style="heading2"]');
+        if (!focusedRow) {
+            throw new Error("Expected style row");
+        }
+        focusedRow.focus();
+        const selection = [textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection];
+
+        wrapper.slot = "light";
+        await flushMutationObserver();
+
+        expect(wrapper.assignedSlot).toBe(lightSlot);
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(getStylePanel(toolbar)).toBe(panel);
+        expect(document.activeElement).toBe(focusedRow);
+        expect([textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection]).toEqual(selection);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+    });
+
+    test("rebinds theme scope when a slot is inserted into an existing relevant host", async () => {
+        vi.spyOn(window, "getComputedStyle").mockReturnValue({ colorScheme: "normal" } as CSSStyleDeclaration);
+        const observeMutation = vi.spyOn(MutationObserver.prototype, "observe");
+        const disconnectMutation = vi.spyOn(MutationObserver.prototype, "disconnect");
+        fixture = createFixture();
+        const host = document.createElement("section");
+        host.dataset.theme = "dark";
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const wrapper = document.createElement("div");
+        wrapper.slot = "editor";
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        wrapper.append(textArea);
+        host.append(wrapper);
+        document.body.append(host);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        expect(wrapper.assignedSlot).toBeNull();
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+        expect(
+            observeMutation.mock.calls.some(
+                ([target, options]) =>
+                    target === shadowRoot &&
+                    (options as MutationObserverInit).childList === true &&
+                    (options as MutationObserverInit).subtree === true &&
+                    (options as MutationObserverInit).attributeFilter?.join(",") === "name"
+            )
+        ).toBe(true);
+        await flushMutationObserver();
+        const observeCallCount = observeMutation.mock.calls.length;
+        const disconnectCallCount = disconnectMutation.mock.calls.length;
+
+        shadowRoot.append(document.createElement("span"));
+        await flushMutationObserver();
+
+        expect(observeMutation.mock.calls).toHaveLength(observeCallCount);
+        expect(disconnectMutation.mock.calls).toHaveLength(disconnectCallCount);
+
+        const lightSlot = document.createElement("slot");
+        lightSlot.name = "editor";
+        lightSlot.dataset.theme = "light";
+        shadowRoot.append(lightSlot);
+        await flushMutationObserver();
+
+        expect(wrapper.assignedSlot).toBe(lightSlot);
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+        lightSlot.remove();
+        await flushMutationObserver();
+
+        expect(wrapper.assignedSlot).toBeNull();
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+    });
+
+    test("refreshes slotchange theme state without remounting or disturbing menu, focus, and selection", async () => {
+        let computedColorScheme = "light";
+        const getComputedStyle = vi
+            .spyOn(window, "getComputedStyle")
+            .mockImplementation(() => ({ colorScheme: computedColorScheme }) as CSSStyleDeclaration);
+        fixture = createFixture();
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const slot = document.createElement("slot");
+        const wrapper = document.createElement("div");
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        textArea.value = "# Heading";
+        textArea.setSelectionRange(0, textArea.value.length, "backward");
+        wrapper.append(textArea);
+        host.append(wrapper);
+        shadowRoot.append(slot);
+        document.body.append(host);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        await flushMutationObserver();
+        const panel = openStylePanel(toolbar);
+        const focusedRow = panel.querySelector<HTMLButtonElement>('button[data-block-style="heading2"]');
+        if (!focusedRow) {
+            throw new Error("Expected style row");
+        }
+        focusedRow.focus();
+        const selection = [textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection];
+        const resolverCallCount = fixture.getResolverCallCount();
+        const computedStyleCallCount = getComputedStyle.mock.calls.length;
+
+        computedColorScheme = "dark";
+        slot.dispatchEvent(new Event("slotchange", { bubbles: true }));
+
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(getStylePanel(toolbar)).toBe(panel);
+        expect(panel.hidden).toBe(false);
+        expect(document.activeElement).toBe(focusedRow);
+        expect([textArea.selectionStart, textArea.selectionEnd, textArea.selectionDirection]).toEqual(selection);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+        expect(fixture.getResolverCallCount()).toBe(resolverCallCount);
+        expect(getComputedStyle.mock.calls).toHaveLength(computedStyleCallCount + 1);
+    });
+
+    test("rebinds exact slotchange listeners for relevant existing slots and releases them through lifecycle changes", async () => {
+        fixture = createFixture();
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        const rootAddListener = vi.spyOn(shadowRoot, "addEventListener");
+        const rootRemoveListener = vi.spyOn(shadowRoot, "removeEventListener");
+        const firstSlot = document.createElement("slot");
+        const secondSlot = document.createElement("slot");
+        secondSlot.name = "other";
+        const firstSlotAddListener = vi.spyOn(firstSlot, "addEventListener");
+        const firstSlotRemoveListener = vi.spyOn(firstSlot, "removeEventListener");
+        const secondSlotAddListener = vi.spyOn(secondSlot, "addEventListener");
+        const secondSlotRemoveListener = vi.spyOn(secondSlot, "removeEventListener");
+        shadowRoot.append(firstSlot, secondSlot);
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        host.append(textArea);
+        document.body.append(host);
+
+        textArea.focus();
+        const rootAdds = getSlotChangeListenerCalls(rootAddListener.mock.calls);
+        const firstSlotAdds = getSlotChangeListenerCalls(firstSlotAddListener.mock.calls);
+        const secondSlotAdds = getSlotChangeListenerCalls(secondSlotAddListener.mock.calls);
+        expect(rootAdds).toHaveLength(1);
+        expect(firstSlotAdds).toHaveLength(1);
+        expect(secondSlotAdds).toHaveLength(1);
+        const callback = rootAdds[0]?.[1];
+        expect(firstSlotAdds[0]?.[1]).toBe(callback);
+        expect(secondSlotAdds[0]?.[1]).toBe(callback);
+
+        const insertedSlot = document.createElement("slot");
+        insertedSlot.name = "inserted";
+        const insertedSlotAddListener = vi.spyOn(insertedSlot, "addEventListener");
+        const insertedSlotRemoveListener = vi.spyOn(insertedSlot, "removeEventListener");
+        shadowRoot.append(insertedSlot);
+        await flushMutationObserver();
+        expect(getSlotChangeListenerCalls(insertedSlotAddListener.mock.calls)).toEqual([["slotchange", callback]]);
+        expect(getSlotChangeListenerCalls(rootAddListener.mock.calls)).toHaveLength(1);
+        expect(getSlotChangeListenerCalls(firstSlotAddListener.mock.calls)).toHaveLength(1);
+
+        insertedSlot.remove();
+        await flushMutationObserver();
+        expect(getSlotChangeListenerCalls(insertedSlotRemoveListener.mock.calls)).toEqual([["slotchange", callback]]);
+
+        fixture.setEnabled(false);
+        expect(getSlotChangeListenerCalls(rootRemoveListener.mock.calls)).toEqual([["slotchange", callback]]);
+        expect(getSlotChangeListenerCalls(firstSlotRemoveListener.mock.calls)).toEqual([["slotchange", callback]]);
+        expect(getSlotChangeListenerCalls(secondSlotRemoveListener.mock.calls)).toEqual([["slotchange", callback]]);
+
+        fixture.setEnabled(true);
+        textArea.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        expect(getSlotChangeListenerCalls(rootAddListener.mock.calls)).toHaveLength(2);
+        expect(getSlotChangeListenerCalls(firstSlotAddListener.mock.calls)).toHaveLength(2);
+        expect(getSlotChangeListenerCalls(secondSlotAddListener.mock.calls)).toHaveLength(2);
+
+        fixture.dispose();
+        fixture = undefined;
+        expect(getSlotChangeListenerCalls(rootRemoveListener.mock.calls)).toHaveLength(2);
+        expect(getSlotChangeListenerCalls(firstSlotRemoveListener.mock.calls)).toHaveLength(2);
+        expect(getSlotChangeListenerCalls(secondSlotRemoveListener.mock.calls)).toHaveLength(2);
+    });
+
+    test("rebinds exact slotchange listeners when the active editor moves between relevant hosts", async () => {
+        fixture = createFixture();
+        const sourceHost = document.createElement("section");
+        const sourceRoot = sourceHost.attachShadow({ mode: "open" });
+        const sourceSlot = document.createElement("slot");
+        sourceRoot.append(sourceSlot);
+        const destinationHost = document.createElement("section");
+        const destinationRoot = destinationHost.attachShadow({ mode: "open" });
+        const destinationSlot = document.createElement("slot");
+        destinationRoot.append(destinationSlot);
+        const sourceRootAddListener = vi.spyOn(sourceRoot, "addEventListener");
+        const sourceRootRemoveListener = vi.spyOn(sourceRoot, "removeEventListener");
+        const sourceSlotAddListener = vi.spyOn(sourceSlot, "addEventListener");
+        const sourceSlotRemoveListener = vi.spyOn(sourceSlot, "removeEventListener");
+        const destinationRootAddListener = vi.spyOn(destinationRoot, "addEventListener");
+        const destinationRootRemoveListener = vi.spyOn(destinationRoot, "removeEventListener");
+        const destinationSlotAddListener = vi.spyOn(destinationSlot, "addEventListener");
+        const destinationSlotRemoveListener = vi.spyOn(destinationSlot, "removeEventListener");
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        sourceHost.append(textArea);
+        document.body.append(sourceHost, destinationHost);
+
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        const callback = getSlotChangeListenerCalls(sourceRootAddListener.mock.calls)[0]?.[1];
+        expect(getSlotChangeListenerCalls(sourceRootAddListener.mock.calls)).toEqual([["slotchange", callback]]);
+        expect(getSlotChangeListenerCalls(sourceSlotAddListener.mock.calls)).toEqual([["slotchange", callback]]);
+
+        destinationHost.append(textArea, toolbar);
+        await flushMutationObserver();
+
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(getSlotChangeListenerCalls(sourceRootRemoveListener.mock.calls)).toEqual([["slotchange", callback]]);
+        expect(getSlotChangeListenerCalls(sourceSlotRemoveListener.mock.calls)).toEqual([["slotchange", callback]]);
+        expect(getSlotChangeListenerCalls(destinationRootAddListener.mock.calls)).toEqual([["slotchange", callback]]);
+        expect(getSlotChangeListenerCalls(destinationSlotAddListener.mock.calls)).toEqual([["slotchange", callback]]);
+
+        fixture.dispose();
+        fixture = undefined;
+        expect(getSlotChangeListenerCalls(destinationRootRemoveListener.mock.calls)).toEqual([
+            ["slotchange", callback]
+        ]);
+        expect(getSlotChangeListenerCalls(destinationSlotRemoveListener.mock.calls)).toEqual([
+            ["slotchange", callback]
+        ]);
+    });
+
+    test("tracks manual slot assignment changes when the platform supports slot assign", async () => {
+        const host = document.createElement("section");
+        const shadowRoot = host.attachShadow({ mode: "open", slotAssignment: "manual" });
+        const darkSlot = document.createElement("slot");
+        darkSlot.dataset.theme = "dark";
+        const lightSlot = document.createElement("slot");
+        lightSlot.dataset.theme = "light";
+        shadowRoot.append(darkSlot, lightSlot);
+        const wrapper = document.createElement("div");
+        const textArea = document.createElement("textarea");
+        textArea.dataset.isSupportedEditor = "true";
+        wrapper.append(textArea);
+        host.append(wrapper);
+        document.body.append(host);
+        if (typeof darkSlot.assign !== "function" || typeof lightSlot.assign !== "function") {
+            return;
+        }
+        vi.spyOn(window, "getComputedStyle").mockReturnValue({ colorScheme: "normal" } as CSSStyleDeclaration);
+        darkSlot.assign(wrapper);
+        await flushMutationObserver();
+        fixture = createFixture();
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+
+        lightSlot.assign(wrapper);
+        await flushMutationObserver();
+
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+    });
+
+    test("rebinds media state across owner windows and settings-driven rerenders without duplicates", async () => {
+        const sourceMedia = createMediaPreferenceFixture(window, false);
+        const frame = document.createElement("iframe");
+        document.body.append(frame);
+        const destinationWindow = frame.contentWindow;
+        const destinationDocument = frame.contentDocument;
+        if (!destinationWindow || !destinationDocument) {
+            throw new Error("Expected destination browsing context");
+        }
+        const destinationMedia = createMediaPreferenceFixture(destinationWindow, true);
+        try {
+            fixture = createFixture();
+            const textArea = createTextArea();
+            textArea.focus();
+            const toolbar = fixture.getToolbar();
+            if (!toolbar) {
+                throw new Error("Expected toolbar");
+            }
+            textArea.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            expect(sourceMedia.addEventListener).toHaveBeenCalledOnce();
+
+            destinationDocument.body.append(textArea, toolbar);
+            await flushMutationObserver();
+
+            expect(toolbar.ownerDocument).toBe(destinationDocument);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
+            expect(sourceMedia.removeEventListener).toHaveBeenCalledOnce();
+            expect(destinationMedia.addEventListener).toHaveBeenCalledOnce();
+
+            destinationMedia.setMatches(false);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+
+            fixture.setRegistry(
+                createCommandRegistry([
+                    {
+                        id: "custom.action",
+                        label: "Custom action",
+                        isAvailable: () => true,
+                        execute: () => true
+                    }
+                ])
+            );
+            expect(toolbar.ownerDocument).toBe(destinationDocument);
+            expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("light");
+            expect(destinationMedia.addEventListener).toHaveBeenCalledOnce();
+            expect(getCommandButton(toolbar, "custom.action").ownerDocument).toBe(destinationDocument);
+
+            fixture.setEnabled(false);
+            expect(toolbar.isConnected).toBe(false);
+            expect(destinationMedia.removeEventListener).toHaveBeenCalledOnce();
+
+            fixture.setEnabled(true);
+            textArea.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+            expect(textArea.nextSibling).toBe(toolbar);
+            expect(destinationMedia.addEventListener).toHaveBeenCalledTimes(2);
+
+            fixture.dispose();
+            fixture = undefined;
+            expect(destinationMedia.removeEventListener).toHaveBeenCalledTimes(2);
+        } finally {
+            sourceMedia.restore();
+            destinationMedia.restore();
+        }
+    });
+
     test("removes the toolbar immediately when settings disable it and recreates it on later focus", () => {
         fixture = createFixture();
         const textArea = createTextArea();
@@ -893,6 +2213,27 @@ describe("Formatting toolbar", () => {
         remountedEditor.focus();
         expect(fixture.getToolbar()).not.toBeNull();
         expect(remountedEditor.nextSibling).toBe(fixture.getToolbar());
+    });
+
+    test("ignores unrelated child insertion outside the active editor and toolbar scope", async () => {
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        textArea.blur();
+        await flushMutationObserver();
+        const resolverCallCount = fixture.getResolverCallCount();
+        const unrelatedSection = document.createElement("section");
+        document.body.append(unrelatedSection);
+        await flushMutationObserver();
+        unrelatedSection.append(document.createElement("span"));
+        await flushMutationObserver();
+
+        expect(fixture.getToolbar()).toBe(toolbar);
+        expect(fixture.getResolverCallCount()).toBe(resolverCallCount);
     });
 
     test("tracks selection, keyboard navigation, and removal inside an open ShadowRoot", async () => {
@@ -1333,6 +2674,49 @@ describe("Formatting toolbar", () => {
         expect(getToolbarDocumentListenerTypes(removeListener.mock.calls)).toEqual(TOOLBAR_DOCUMENT_EVENT_TYPES);
     });
 
+    test("refreshes only for supported theme attributes on the current composed scope", async () => {
+        const getComputedStyle = vi
+            .spyOn(window, "getComputedStyle")
+            .mockReturnValue({ colorScheme: "normal" } as CSSStyleDeclaration);
+        const scope = document.createElement("section");
+        const textArea = document.createElement("textarea");
+        textArea.dataset.toolbarPlacement = "after-editor";
+        textArea.dataset.isSupportedEditor = "true";
+        scope.append(textArea);
+        document.body.append(scope);
+        fixture = createFixture();
+        textArea.focus();
+        expect(fixture.getToolbar()).not.toBeNull();
+        textArea.blur();
+        await flushMutationObserver();
+        const getRefreshCount = (): number =>
+            getComputedStyle.mock.calls.filter(([element]) => element === textArea).length;
+        const initialRefreshCount = getRefreshCount();
+
+        scope.dataset.custom = "dark";
+        await flushMutationObserver();
+        scope.title = "dark";
+        await flushMutationObserver();
+        textArea.dataset.custom = "dark";
+        await flushMutationObserver();
+        textArea.title = "dark";
+        await flushMutationObserver();
+        expect(getRefreshCount()).toBe(initialRefreshCount);
+
+        for (const [attributeName, attributeValue] of [
+            ["class", "theme-signal"],
+            ["style", "color-scheme: normal"],
+            ["data-theme", "custom"],
+            ["data-color-mode", "custom"],
+            ["data-bs-theme", "custom"]
+        ] as const) {
+            const refreshCount = getRefreshCount();
+            textArea.setAttribute(attributeName, attributeValue);
+            await flushMutationObserver();
+            expect(getRefreshCount()).toBe(refreshCount + 1);
+        }
+    });
+
     test("revalidates every active textarea attribute for exclusions without observing toolbar mutations", async () => {
         const observeMutation = vi.spyOn(MutationObserver.prototype, "observe");
         fixture = createFixture();
@@ -1344,14 +2728,34 @@ describe("Formatting toolbar", () => {
         }
         expect(
             observeMutation.mock.calls.some(
-                ([target, options]) => target === textArea && (options as MutationObserverInit).attributes === true
+                ([target, options]) =>
+                    target === document.documentElement &&
+                    (options as MutationObserverInit).subtree === true &&
+                    (options as MutationObserverInit).attributeFilter?.join(",") === "id"
             )
         ).toBe(true);
-        expect(
-            observeMutation.mock.calls.some(
-                ([target, options]) => target === toolbar && (options as MutationObserverInit).attributes === true
+        const broadlyObservedTargets = observeMutation.mock.calls
+            .filter(
+                ([, options]) =>
+                    (options as MutationObserverInit).attributes === true &&
+                    (options as MutationObserverInit).attributeFilter === undefined &&
+                    (options as MutationObserverInit).subtree !== true
             )
-        ).toBe(false);
+            .map(([target]) => target);
+        expect(new Set(broadlyObservedTargets)).toEqual(new Set([textArea]));
+        expect(broadlyObservedTargets).not.toContain(toolbar);
+        const colorSchemeObservedTargets = observeMutation.mock.calls
+            .filter(
+                ([, options]) =>
+                    (options as MutationObserverInit).attributes === true &&
+                    (options as MutationObserverInit).attributeFilter?.join(",") ===
+                        "class,style,data-theme,data-color-mode,data-bs-theme"
+            )
+            .map(([target]) => target);
+        expect(new Set(colorSchemeObservedTargets)).toEqual(
+            new Set([textArea, document.body, document.documentElement])
+        );
+        expect(colorSchemeObservedTargets).not.toContain(toolbar);
 
         textArea.classList.add("excluded-editor");
         await flushMutationObserver();
@@ -1404,7 +2808,7 @@ describe("Formatting toolbar", () => {
         expect(toolbar.isConnected).toBe(false);
         expect(getToolbarDocumentListenerTypes(removeListeners[2].mock.calls)).toEqual(TOOLBAR_ACTIVE_EVENT_TYPES);
         expect(observeMutation.mock.calls).toHaveLength(observeCountBeforeDisable);
-        expect(disconnectMutation.mock.calls).toHaveLength(disconnectCountBeforeDisable + 1);
+        expect(disconnectMutation.mock.calls).toHaveLength(disconnectCountBeforeDisable + 4);
 
         fixture.setEnabled(true);
         textArea.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
@@ -1535,24 +2939,126 @@ describe("Formatting toolbar", () => {
         expect(toolbar.querySelectorAll("[src], [href]")).toHaveLength(0);
 
         const style = toolbar.querySelector("style");
-        expect(style?.textContent).toContain(`.${TOOLBAR_ICON_CLASS}`);
-        expect(style?.textContent).toContain("fill: currentColor");
-        expect(style?.textContent).toContain("@media (forced-colors: active)");
-        expect(style?.textContent).toContain("background: Canvas");
-        expect(style?.textContent).toContain("background: ButtonFace");
-        expect(style?.textContent).toContain("border-color: ButtonText");
-        expect(style?.textContent).toContain("color: GrayText");
-        expect(style?.textContent).toContain("opacity: 1 !important");
-        expect(style?.textContent).toContain("font-weight: 600 !important");
-        expect(style?.textContent).toContain("__menu-separator");
-        expect(style?.textContent).toContain("align-self: stretch !important");
-        expect(style?.textContent).toContain("border-top: 1px solid #8c959f !important");
-        expect(style?.textContent).toContain("border-top-color: CanvasText !important");
-        expect(style?.textContent).toContain("__menu-item--active");
-        expect(style?.textContent).toContain("background: #dbeafe");
-        expect(style?.textContent).toContain("background: Highlight");
-        expect(style?.textContent).toContain("color: HighlightText");
-        expect(style?.textContent).toContain(`
+        if (!style?.textContent) {
+            throw new Error("Expected toolbar styles");
+        }
+        const css = style.textContent;
+        const requiredTokens = [
+            "--tme-toolbar-surface",
+            "--tme-toolbar-border",
+            "--tme-toolbar-button-surface",
+            "--tme-toolbar-button-border",
+            "--tme-toolbar-button-text",
+            "--tme-toolbar-button-icon",
+            "--tme-toolbar-button-hover-surface",
+            "--tme-toolbar-focus-ring",
+            "--tme-toolbar-disabled-text",
+            "--tme-toolbar-menu-surface",
+            "--tme-toolbar-menu-border",
+            "--tme-toolbar-menu-shadow",
+            "--tme-toolbar-menu-active-surface",
+            "--tme-toolbar-menu-active-border",
+            "--tme-toolbar-menu-active-text",
+            "--tme-toolbar-separator"
+        ];
+        for (const token of requiredTokens) {
+            expect(css.split(token).length).toBeGreaterThanOrEqual(4);
+        }
+        const lightDeclarations = [
+            "--tme-toolbar-surface: #f7f7f7;",
+            "--tme-toolbar-border: #b8b8b8;",
+            "--tme-toolbar-button-surface: #ffffff;",
+            "--tme-toolbar-button-border: #a8a8a8;",
+            "--tme-toolbar-button-text: #202020;",
+            "--tme-toolbar-button-icon: #202020;",
+            "--tme-toolbar-button-hover-surface: #eeeeee;",
+            "--tme-toolbar-focus-ring: #2563eb;",
+            "--tme-toolbar-disabled-text: #777777;",
+            "--tme-toolbar-menu-surface: #f7f7f7;",
+            "--tme-toolbar-menu-border: #a8a8a8;",
+            "--tme-toolbar-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);",
+            "--tme-toolbar-menu-active-surface: #dbeafe;",
+            "--tme-toolbar-menu-active-border: #60a5fa;",
+            "--tme-toolbar-menu-active-text: #202020;",
+            "--tme-toolbar-separator: #8c959f;"
+        ];
+        const darkDeclarations = [
+            "--tme-toolbar-surface: #1f2937;",
+            "--tme-toolbar-border: #9ca3af;",
+            "--tme-toolbar-button-surface: #111827;",
+            "--tme-toolbar-button-border: #9ca3af;",
+            "--tme-toolbar-button-text: #f3f4f6;",
+            "--tme-toolbar-button-icon: #f3f4f6;",
+            "--tme-toolbar-button-hover-surface: #374151;",
+            "--tme-toolbar-focus-ring: #bfdbfe;",
+            "--tme-toolbar-disabled-text: #d1d5db;",
+            "--tme-toolbar-menu-surface: #1f2937;",
+            "--tme-toolbar-menu-border: #9ca3af;",
+            "--tme-toolbar-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);",
+            "--tme-toolbar-menu-active-surface: #1e3a8a;",
+            "--tme-toolbar-menu-active-border: #bfdbfe;",
+            "--tme-toolbar-menu-active-text: #ffffff;",
+            "--tme-toolbar-separator: #9ca3af;"
+        ];
+        for (const declaration of [...lightDeclarations, ...darkDeclarations]) {
+            expect(css).toContain(declaration);
+        }
+        expect(css).toContain('[data-tampermonkey-markdown-enhancer-color-scheme="light"]');
+        expect(css).toContain('[data-tampermonkey-markdown-enhancer-color-scheme="dark"]');
+        expect(css).toContain("color-scheme: light !important");
+        expect(css).toContain("color-scheme: dark !important");
+        expect(css).toContain("fill: currentColor");
+        expect(css).toContain("font-weight: 600 !important");
+        expect(css).toContain("__menu-separator");
+        expect(css).toContain("align-self: stretch !important");
+        expect(css).toContain("border-top: 1px solid var(--tme-toolbar-separator) !important");
+        expect(css).toContain("__menu-item--active");
+        expect(css).toContain(`
+.tampermonkey-markdown-enhancer-formatting-toolbar button:disabled .${TOOLBAR_ICON_CLASS},
+.tampermonkey-markdown-enhancer-formatting-toolbar button[aria-disabled="true"] .${TOOLBAR_ICON_CLASS} {
+    color: inherit !important;
+}
+`);
+        expect(css).toContain(`
+.tampermonkey-markdown-enhancer-formatting-toolbar__menu-panel .tampermonkey-markdown-enhancer-formatting-toolbar__menu-item--active .${TOOLBAR_ICON_CLASS} {
+    color: inherit !important;
+}
+`);
+        expect(css).toContain(`
+.tampermonkey-markdown-enhancer-formatting-toolbar__menu-panel .tampermonkey-markdown-enhancer-formatting-toolbar__menu-item--active:hover:not(:disabled):not([aria-disabled="true"]),
+.tampermonkey-markdown-enhancer-formatting-toolbar__menu-panel .tampermonkey-markdown-enhancer-formatting-toolbar__menu-item--active:focus-visible {
+    background: var(--tme-toolbar-menu-active-surface) !important;
+    border-color: var(--tme-toolbar-menu-active-border) !important;
+    color: var(--tme-toolbar-menu-active-text) !important;
+}
+`);
+        expect(css).toContain(`
+.tampermonkey-markdown-enhancer-formatting-toolbar button:focus-visible {
+    outline: 2px solid var(--tme-toolbar-focus-ring) !important;
+    outline-offset: 1px !important;
+}
+`);
+
+        const forcedColorsIndex = css.indexOf("@media (forced-colors: active)");
+        expect(forcedColorsIndex).toBeGreaterThan(css.indexOf("color-scheme: dark !important"));
+        const forcedColorsCss = css.slice(forcedColorsIndex);
+        expect(forcedColorsCss).toContain("background: Canvas");
+        expect(forcedColorsCss).toContain("background: ButtonFace");
+        expect(forcedColorsCss).toContain("border-color: ButtonText");
+        expect(forcedColorsCss).toContain("color: GrayText");
+        expect(forcedColorsCss).toContain("opacity: 1 !important");
+        expect(forcedColorsCss).toContain("border-top-color: CanvasText !important");
+        expect(forcedColorsCss).toContain("background: Highlight");
+        expect(forcedColorsCss).toContain("color: HighlightText");
+        expect(forcedColorsCss).toContain(`
+    .tampermonkey-markdown-enhancer-formatting-toolbar__menu-panel .tampermonkey-markdown-enhancer-formatting-toolbar__menu-item--active:hover:not(:disabled):not([aria-disabled="true"]),
+    .tampermonkey-markdown-enhancer-formatting-toolbar__menu-panel .tampermonkey-markdown-enhancer-formatting-toolbar__menu-item--active:focus-visible {
+        background: Highlight !important;
+        border-color: Highlight !important;
+        color: HighlightText !important;
+    }
+`);
+        expect(forcedColorsCss).toContain(`
     .tampermonkey-markdown-enhancer-formatting-toolbar__menu-panel .tampermonkey-markdown-enhancer-formatting-toolbar__menu-item--active[aria-disabled="true"] {
         background: Highlight !important;
         border-color: Highlight !important;
@@ -1560,6 +3066,61 @@ describe("Formatting toolbar", () => {
         opacity: 1 !important;
     }
 `);
+    });
+
+    test("meets numeric contrast thresholds for enabled text, focus, and dark controls", () => {
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.focus();
+        const css = fixture.getToolbar()?.querySelector("style")?.textContent;
+        if (!css) {
+            throw new Error("Expected toolbar styles");
+        }
+
+        const enabledTextPairs = [
+            ["--tme-toolbar-button-text", "--tme-toolbar-button-surface"],
+            ["--tme-toolbar-button-text", "--tme-toolbar-button-hover-surface"],
+            ["--tme-toolbar-button-icon", "--tme-toolbar-button-surface"],
+            ["--tme-toolbar-menu-active-text", "--tme-toolbar-menu-active-surface"]
+        ] as const;
+        const focusPairs = [
+            ["--tme-toolbar-focus-ring", "--tme-toolbar-button-surface"],
+            ["--tme-toolbar-focus-ring", "--tme-toolbar-button-hover-surface"],
+            ["--tme-toolbar-focus-ring", "--tme-toolbar-menu-active-surface"]
+        ] as const;
+        const darkControlPairs = [
+            ["--tme-toolbar-border", "--tme-toolbar-surface"],
+            ["--tme-toolbar-button-border", "--tme-toolbar-button-surface"],
+            ["--tme-toolbar-button-border", "--tme-toolbar-surface"],
+            ["--tme-toolbar-button-border", "--tme-toolbar-button-hover-surface"],
+            ["--tme-toolbar-menu-border", "--tme-toolbar-menu-surface"],
+            ["--tme-toolbar-separator", "--tme-toolbar-menu-surface"],
+            ["--tme-toolbar-menu-active-border", "--tme-toolbar-menu-active-surface"],
+            ["--tme-toolbar-menu-active-border", "--tme-toolbar-menu-surface"]
+        ] as const;
+        const expectContrastAtLeast = (
+            tokens: ReadonlyMap<string, string>,
+            scheme: "light" | "dark",
+            tokenPairs: readonly (readonly [string, string])[],
+            threshold: number
+        ): void => {
+            for (const [foregroundToken, backgroundToken] of tokenPairs) {
+                const contrast = calculateContrastRatio(
+                    getColorToken(tokens, foregroundToken),
+                    getColorToken(tokens, backgroundToken)
+                );
+                expect(contrast, `${scheme} ${foregroundToken} against ${backgroundToken}`).toBeGreaterThanOrEqual(
+                    threshold
+                );
+            }
+        };
+
+        for (const scheme of ["light", "dark"] as const) {
+            const tokens = readColorTokens(css, scheme);
+            expectContrastAtLeast(tokens, scheme, enabledTextPairs, 4.5);
+            expectContrastAtLeast(tokens, scheme, focusPairs, 3);
+        }
+        expectContrastAtLeast(readColorTokens(css, "dark"), "dark", darkControlPairs, 3);
     });
 
     test("does not execute a toolbar command for an already-defaultPrevented click", () => {

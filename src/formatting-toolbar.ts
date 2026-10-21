@@ -4,6 +4,17 @@ import {
     type ActiveBlockStyle,
     type ConcreteBlockStyle
 } from "./block-styles";
+import {
+    collectColorSchemeSignalElements,
+    collectColorSchemeSignals,
+    collectColorSchemeSlotRoots,
+    COLOR_SCHEME_SIGNAL_ATTRIBUTES,
+    isColorSchemeSignalAttribute,
+    isColorSchemeSignalElement,
+    readColorSchemeMediaQuery,
+    resolveActiveColorScheme,
+    type ActiveColorScheme
+} from "./color-scheme";
 import { EDITOR_COMMAND_IDS, type EditorCommand, type EditorCommandRegistry } from "./command-registry";
 import type { EditorToolbarPlacement } from "./editor-adapter";
 import { readEditorState } from "./editor-state";
@@ -52,6 +63,7 @@ type ToolbarFocusTarget =
 
 const TOOLBAR_CLASS = "tampermonkey-markdown-enhancer-formatting-toolbar";
 const TOOLBAR_DATA_ATTRIBUTE = "data-tampermonkey-markdown-enhancer-formatting-toolbar";
+const TOOLBAR_COLOR_SCHEME_DATA_ATTRIBUTE = "data-tampermonkey-markdown-enhancer-color-scheme";
 const MENU_PANEL_CLASS = `${TOOLBAR_CLASS}__menu-panel`;
 const MENU_WRAPPER_CLASS = `${TOOLBAR_CLASS}__menu-wrapper`;
 const MENU_SEPARATOR_CLASS = `${TOOLBAR_CLASS}__menu-separator`;
@@ -69,13 +81,53 @@ const PRIMARY_COMMANDS: readonly string[] = [
 
 const PRIMARY_COMMAND_IDS = new Set(PRIMARY_COMMANDS);
 const BLOCK_STYLE_SET = new Set<ConcreteBlockStyle>(CONCRETE_BLOCK_STYLES);
+const STYLE_SHEET_SIGNAL_ATTRIBUTES = ["rel", "href", "media", "disabled"] as const;
+const COLOR_SCHEME_MEDIA_REMOVAL_ATTEMPTS = 2;
 
 const TOOLBAR_STYLES = `
+.${TOOLBAR_CLASS}[${TOOLBAR_COLOR_SCHEME_DATA_ATTRIBUTE}="light"] {
+    --tme-toolbar-surface: #f7f7f7;
+    --tme-toolbar-border: #b8b8b8;
+    --tme-toolbar-button-surface: #ffffff;
+    --tme-toolbar-button-border: #a8a8a8;
+    --tme-toolbar-button-text: #202020;
+    --tme-toolbar-button-icon: #202020;
+    --tme-toolbar-button-hover-surface: #eeeeee;
+    --tme-toolbar-focus-ring: #2563eb;
+    --tme-toolbar-disabled-text: #777777;
+    --tme-toolbar-menu-surface: #f7f7f7;
+    --tme-toolbar-menu-border: #a8a8a8;
+    --tme-toolbar-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    --tme-toolbar-menu-active-surface: #dbeafe;
+    --tme-toolbar-menu-active-border: #60a5fa;
+    --tme-toolbar-menu-active-text: #202020;
+    --tme-toolbar-separator: #8c959f;
+    color-scheme: light !important;
+}
+.${TOOLBAR_CLASS}[${TOOLBAR_COLOR_SCHEME_DATA_ATTRIBUTE}="dark"] {
+    --tme-toolbar-surface: #1f2937;
+    --tme-toolbar-border: #9ca3af;
+    --tme-toolbar-button-surface: #111827;
+    --tme-toolbar-button-border: #9ca3af;
+    --tme-toolbar-button-text: #f3f4f6;
+    --tme-toolbar-button-icon: #f3f4f6;
+    --tme-toolbar-button-hover-surface: #374151;
+    --tme-toolbar-focus-ring: #bfdbfe;
+    --tme-toolbar-disabled-text: #d1d5db;
+    --tme-toolbar-menu-surface: #1f2937;
+    --tme-toolbar-menu-border: #9ca3af;
+    --tme-toolbar-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --tme-toolbar-menu-active-surface: #1e3a8a;
+    --tme-toolbar-menu-active-border: #bfdbfe;
+    --tme-toolbar-menu-active-text: #ffffff;
+    --tme-toolbar-separator: #9ca3af;
+    color-scheme: dark !important;
+}
 .${TOOLBAR_CLASS} {
     all: initial !important;
     align-items: center !important;
-    background: #f7f7f7 !important;
-    border: 1px solid #b8b8b8 !important;
+    background: var(--tme-toolbar-surface) !important;
+    border: 1px solid var(--tme-toolbar-border) !important;
     border-radius: 4px !important;
     box-sizing: border-box !important;
     display: flex !important;
@@ -96,10 +148,10 @@ const TOOLBAR_STYLES = `
 .${TOOLBAR_CLASS} button {
     all: initial !important;
     align-items: center !important;
-    background: #ffffff !important;
-    border: 1px solid #a8a8a8 !important;
+    background: var(--tme-toolbar-button-surface) !important;
+    border: 1px solid var(--tme-toolbar-button-border) !important;
     border-radius: 3px !important;
-    color: #202020 !important;
+    color: var(--tme-toolbar-button-text) !important;
     cursor: pointer !important;
     display: inline-flex !important;
     font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
@@ -112,24 +164,29 @@ const TOOLBAR_STYLES = `
     white-space: nowrap !important;
 }
 .${TOOLBAR_CLASS} button:hover:not(:disabled):not([aria-disabled="true"]) {
-    background: #eeeeee !important;
+    background: var(--tme-toolbar-button-hover-surface) !important;
 }
 .${TOOLBAR_CLASS} button:focus-visible {
-    outline: 2px solid #2563eb !important;
+    outline: 2px solid var(--tme-toolbar-focus-ring) !important;
     outline-offset: 1px !important;
 }
 .${TOOLBAR_CLASS} button:disabled,
 .${TOOLBAR_CLASS} button[aria-disabled="true"] {
-    color: #777777 !important;
+    color: var(--tme-toolbar-disabled-text) !important;
     cursor: default !important;
     opacity: 0.55 !important;
 }
 .${TOOLBAR_CLASS} .${TOOLBAR_ICON_CLASS} {
+    color: var(--tme-toolbar-button-icon) !important;
     display: block !important;
     fill: currentColor !important;
     flex: none !important;
     height: 16px !important;
     width: 16px !important;
+}
+.${TOOLBAR_CLASS} button:disabled .${TOOLBAR_ICON_CLASS},
+.${TOOLBAR_CLASS} button[aria-disabled="true"] .${TOOLBAR_ICON_CLASS} {
+    color: inherit !important;
 }
 .${TOOLBAR_CLASS} .${CARET_ICON_CLASS} {
     height: 12px !important;
@@ -146,10 +203,10 @@ const TOOLBAR_STYLES = `
 }
 .${MENU_PANEL_CLASS} {
     all: initial !important;
-    background: #f7f7f7 !important;
-    border: 1px solid #a8a8a8 !important;
+    background: var(--tme-toolbar-menu-surface) !important;
+    border: 1px solid var(--tme-toolbar-menu-border) !important;
     border-radius: 4px !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18) !important;
+    box-shadow: var(--tme-toolbar-menu-shadow) !important;
     display: grid !important;
     gap: 2px !important;
     left: 0 !important;
@@ -170,14 +227,24 @@ const TOOLBAR_STYLES = `
     width: 100% !important;
 }
 .${MENU_PANEL_CLASS} .${ACTIVE_MENU_ITEM_CLASS} {
-    background: #dbeafe !important;
-    border-color: #60a5fa !important;
+    background: var(--tme-toolbar-menu-active-surface) !important;
+    border-color: var(--tme-toolbar-menu-active-border) !important;
+    color: var(--tme-toolbar-menu-active-text) !important;
+}
+.${MENU_PANEL_CLASS} .${ACTIVE_MENU_ITEM_CLASS}:hover:not(:disabled):not([aria-disabled="true"]),
+.${MENU_PANEL_CLASS} .${ACTIVE_MENU_ITEM_CLASS}:focus-visible {
+    background: var(--tme-toolbar-menu-active-surface) !important;
+    border-color: var(--tme-toolbar-menu-active-border) !important;
+    color: var(--tme-toolbar-menu-active-text) !important;
+}
+.${MENU_PANEL_CLASS} .${ACTIVE_MENU_ITEM_CLASS} .${TOOLBAR_ICON_CLASS} {
+    color: inherit !important;
 }
 .${MENU_SEPARATOR_CLASS} {
     all: initial !important;
     align-self: stretch !important;
     border: 0 !important;
-    border-top: 1px solid #8c959f !important;
+    border-top: 1px solid var(--tme-toolbar-separator) !important;
     display: block !important;
     height: 0 !important;
     margin: 4px 2px !important;
@@ -197,8 +264,17 @@ const TOOLBAR_STYLES = `
         color: ButtonText !important;
         forced-color-adjust: auto !important;
     }
+    .${TOOLBAR_CLASS} .${TOOLBAR_ICON_CLASS} {
+        color: currentColor !important;
+    }
     .${TOOLBAR_CLASS} button:hover:not(:disabled):not([aria-disabled="true"]),
     .${MENU_PANEL_CLASS} .${ACTIVE_MENU_ITEM_CLASS} {
+        background: Highlight !important;
+        border-color: Highlight !important;
+        color: HighlightText !important;
+    }
+    .${MENU_PANEL_CLASS} .${ACTIVE_MENU_ITEM_CLASS}:hover:not(:disabled):not([aria-disabled="true"]),
+    .${MENU_PANEL_CLASS} .${ACTIVE_MENU_ITEM_CLASS}:focus-visible {
         background: Highlight !important;
         border-color: Highlight !important;
         color: HighlightText !important;
@@ -250,6 +326,12 @@ const isShadowRoot = (value: unknown): value is ShadowRoot =>
 
 const isFocusableElement = (value: unknown): value is HTMLElement =>
     isElement(value) && typeof (value as HTMLElement).focus === "function";
+
+const areNodeListsEqual = <NodeType extends Node>(
+    firstNodes: readonly NodeType[],
+    secondNodes: readonly NodeType[]
+): boolean =>
+    firstNodes.length === secondNodes.length && firstNodes.every((node, index) => node === secondNodes[index]);
 
 const getEditorRoot = (textArea: HTMLTextAreaElement): ToolbarRoot => {
     const root = textArea.getRootNode();
@@ -337,6 +419,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     const container = document.createElement("div");
     container.className = TOOLBAR_CLASS;
     container.setAttribute(TOOLBAR_DATA_ATTRIBUTE, "");
+    container.setAttribute(TOOLBAR_COLOR_SCHEME_DATA_ATTRIBUTE, "light");
     container.setAttribute("role", "toolbar");
     container.setAttribute("aria-label", "Markdown formatting");
 
@@ -357,10 +440,26 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     let isDisposed = false;
     let isRefreshQueued = false;
     let observer: MutationObserver | undefined;
+    let colorSchemeObserver: MutationObserver | undefined;
+    let slotObserver: MutationObserver | undefined;
+    let styleSheetObserver: MutationObserver | undefined;
+    let observedEditorTextArea: HTMLTextAreaElement | undefined;
+    let observedMutationRoots: readonly ToolbarRoot[] = [];
+    let observedColorSchemeElements: readonly Element[] = [];
+    let observedSlotElements: readonly Element[] = [];
+    let observedSlotRoots: readonly ShadowRoot[] = [];
+    let observedStyleSheetRoots: readonly ToolbarRoot[] = [];
+    let activeColorScheme: ActiveColorScheme = "light";
+    let colorSchemeMediaQuery: MediaQueryList | null = null;
+    let colorSchemeOwnerWindow: Window | null | undefined;
+    let colorSchemeMediaListenerMode: "modern" | "legacy" | undefined;
     const styleCommandsByStyle = new Map<ConcreteBlockStyle, EditorCommand>();
     const documentListenerModes = new Map<Document, "active" | "discovery">();
     let retainedDiscoveryDocument = initialDocument;
     const selectionChangeRoots = new Set<ShadowRoot>();
+    const slotChangeTargets = new Set<ShadowRoot | HTMLSlotElement>();
+    const handledSlotChangeEvents = new WeakSet<Event>();
+    const styleSheetLoadRoots = new Set<ToolbarRoot>();
     const outsidePointerRoots = new Set<ToolbarRoot>();
     const deferredOutsidePointerDismissals = new WeakMap<Event, object>();
 
@@ -402,6 +501,90 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         }
         const textArea = resolveEventPath(event).path.find(isTextAreaElement);
         return textArea ? options.resolveEditorFromTextArea(textArea) : null;
+    };
+
+    const handleColorSchemeMediaChange = (): void => {
+        if (!isDisposed && activeEditor) {
+            refreshActiveColorScheme(activeEditor);
+        }
+    };
+
+    const removeColorSchemeMediaListenerByMode = (
+        mediaQueryList: MediaQueryList,
+        listenerMode: "modern" | "legacy"
+    ): void => {
+        for (let attempt = 0; attempt < COLOR_SCHEME_MEDIA_REMOVAL_ATTEMPTS; attempt += 1) {
+            try {
+                if (listenerMode === "modern" && typeof mediaQueryList.removeEventListener === "function") {
+                    mediaQueryList.removeEventListener("change", handleColorSchemeMediaChange);
+                } else if (listenerMode === "legacy" && typeof mediaQueryList.removeListener === "function") {
+                    mediaQueryList.removeListener(handleColorSchemeMediaChange);
+                }
+                return;
+            } catch {
+                // Retry once because page-owned listener wrappers can fail transiently.
+            }
+        }
+    };
+
+    const removeColorSchemeMediaListener = (): void => {
+        const mediaQueryList = colorSchemeMediaQuery;
+        const listenerMode = colorSchemeMediaListenerMode;
+        colorSchemeMediaQuery = null;
+        colorSchemeOwnerWindow = undefined;
+        colorSchemeMediaListenerMode = undefined;
+        if (mediaQueryList && listenerMode) {
+            removeColorSchemeMediaListenerByMode(mediaQueryList, listenerMode);
+        }
+    };
+
+    const addColorSchemeMediaListener = (mediaQueryList: MediaQueryList): "modern" | "legacy" | undefined => {
+        if (
+            typeof mediaQueryList.addEventListener === "function" &&
+            typeof mediaQueryList.removeEventListener === "function"
+        ) {
+            try {
+                mediaQueryList.addEventListener("change", handleColorSchemeMediaChange);
+                return "modern";
+            } catch {
+                removeColorSchemeMediaListenerByMode(mediaQueryList, "modern");
+            }
+        }
+        if (typeof mediaQueryList.addListener === "function" && typeof mediaQueryList.removeListener === "function") {
+            try {
+                mediaQueryList.addListener(handleColorSchemeMediaChange);
+                return "legacy";
+            } catch {
+                removeColorSchemeMediaListenerByMode(mediaQueryList, "legacy");
+            }
+        }
+        return undefined;
+    };
+
+    const syncColorSchemeMediaQuery = (ownerWindow: Window | null): void => {
+        if (colorSchemeOwnerWindow !== ownerWindow) {
+            removeColorSchemeMediaListener();
+            colorSchemeOwnerWindow = ownerWindow;
+            colorSchemeMediaQuery = readColorSchemeMediaQuery(ownerWindow);
+        } else if (!colorSchemeMediaQuery) {
+            colorSchemeMediaQuery = readColorSchemeMediaQuery(ownerWindow);
+        }
+        if (colorSchemeMediaQuery && !colorSchemeMediaListenerMode) {
+            colorSchemeMediaListenerMode = addColorSchemeMediaListener(colorSchemeMediaQuery);
+        }
+    };
+
+    const refreshActiveColorScheme = (editor: FormattingToolbarEditor): void => {
+        const nextColorScheme = resolveActiveColorScheme(
+            collectColorSchemeSignals(editor.textArea, colorSchemeMediaQuery)
+        );
+        if (
+            activeColorScheme !== nextColorScheme ||
+            container.getAttribute(TOOLBAR_COLOR_SCHEME_DATA_ATTRIBUTE) !== nextColorScheme
+        ) {
+            activeColorScheme = nextColorScheme;
+            container.setAttribute(TOOLBAR_COLOR_SCHEME_DATA_ATTRIBUTE, nextColorScheme);
+        }
     };
 
     const isToolbarFocused = (): boolean => {
@@ -931,10 +1114,155 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         const target = isDocument(root) ? root.documentElement : root;
         observer?.observe(target, {
             attributeFilter: ["id"],
+            attributeOldValue: true,
             attributes: true,
             childList: true,
             subtree: true
         });
+    };
+
+    const collectStyleSheetRoots = (textArea: HTMLTextAreaElement): readonly ToolbarRoot[] => {
+        const roots = new Set<ToolbarRoot>([textArea.ownerDocument]);
+        for (const element of collectColorSchemeSignalElements(textArea)) {
+            const root = element.getRootNode();
+            if (isShadowRoot(root)) {
+                roots.add(root);
+            }
+        }
+        for (const root of collectColorSchemeSlotRoots(textArea)) {
+            roots.add(root);
+        }
+        return [...roots];
+    };
+
+    const syncMutationObservation = (editor: FormattingToolbarEditor, shadowRoots: readonly ShadowRoot[]): void => {
+        const roots = [...new Set<ToolbarRoot>([initialDocument, editor.textArea.ownerDocument, ...shadowRoots])];
+        if (observedEditorTextArea === editor.textArea && areNodeListsEqual(observedMutationRoots, roots)) {
+            return;
+        }
+        observer?.disconnect();
+        observedEditorTextArea = editor.textArea;
+        observedMutationRoots = roots;
+        for (const root of roots) {
+            observeMutationRoot(root);
+        }
+        observer?.observe(editor.textArea, { attributes: true });
+    };
+
+    const syncColorSchemeObservation = (textArea: HTMLTextAreaElement): void => {
+        const elements = collectColorSchemeSignalElements(textArea);
+        if (areNodeListsEqual(observedColorSchemeElements, elements)) {
+            return;
+        }
+        colorSchemeObserver?.disconnect();
+        observedColorSchemeElements = elements;
+        for (const element of elements) {
+            colorSchemeObserver?.observe(element, {
+                attributeFilter: [...COLOR_SCHEME_SIGNAL_ATTRIBUTES],
+                attributes: true
+            });
+        }
+    };
+
+    const collectSlotChangeTargets = (textArea: HTMLTextAreaElement): readonly (ShadowRoot | HTMLSlotElement)[] => {
+        const targets = new Set<ShadowRoot | HTMLSlotElement>();
+        for (const root of collectColorSchemeSlotRoots(textArea)) {
+            targets.add(root);
+            for (const slot of root.querySelectorAll<HTMLSlotElement>("slot")) {
+                targets.add(slot);
+            }
+        }
+        return [...targets];
+    };
+
+    const syncSlotChangeListeners = (targets: readonly (ShadowRoot | HTMLSlotElement)[]): void => {
+        const nextTargets = new Set(targets);
+        for (const target of slotChangeTargets) {
+            if (!nextTargets.has(target)) {
+                target.removeEventListener("slotchange", handleSlotChange);
+                slotChangeTargets.delete(target);
+            }
+        }
+        for (const target of nextTargets) {
+            if (!slotChangeTargets.has(target)) {
+                target.addEventListener("slotchange", handleSlotChange);
+                slotChangeTargets.add(target);
+            }
+        }
+    };
+
+    const syncSlotObservation = (textArea: HTMLTextAreaElement): void => {
+        const elements = collectColorSchemeSignalElements(textArea);
+        const roots = collectColorSchemeSlotRoots(textArea);
+        syncSlotChangeListeners(collectSlotChangeTargets(textArea));
+        if (areNodeListsEqual(observedSlotElements, elements) && areNodeListsEqual(observedSlotRoots, roots)) {
+            return;
+        }
+        slotObserver?.disconnect();
+        observedSlotElements = elements;
+        observedSlotRoots = roots;
+        for (const element of elements) {
+            slotObserver?.observe(element, { attributeFilter: ["slot"], attributes: true });
+        }
+        for (const root of roots) {
+            slotObserver?.observe(root, {
+                attributeFilter: ["name"],
+                attributes: true,
+                childList: true,
+                subtree: true
+            });
+        }
+    };
+
+    const syncStyleSheetLoadListeners = (roots: readonly ToolbarRoot[]): void => {
+        const nextRoots = new Set(roots);
+        for (const root of styleSheetLoadRoots) {
+            if (!nextRoots.has(root)) {
+                root.removeEventListener("load", handleStyleSheetLoad, true);
+                styleSheetLoadRoots.delete(root);
+            }
+        }
+        for (const root of nextRoots) {
+            if (!styleSheetLoadRoots.has(root)) {
+                root.addEventListener("load", handleStyleSheetLoad, true);
+                styleSheetLoadRoots.add(root);
+            }
+        }
+    };
+
+    const syncStyleSheetObservation = (textArea: HTMLTextAreaElement): void => {
+        const roots = collectStyleSheetRoots(textArea);
+        syncStyleSheetLoadListeners(roots);
+        if (areNodeListsEqual(observedStyleSheetRoots, roots)) {
+            return;
+        }
+        styleSheetObserver?.disconnect();
+        observedStyleSheetRoots = roots;
+        for (const root of roots) {
+            styleSheetObserver?.observe(isDocument(root) ? root.documentElement : root, {
+                attributeFilter: [...STYLE_SHEET_SIGNAL_ATTRIBUTES],
+                attributeOldValue: true,
+                attributes: true,
+                characterData: true,
+                childList: true,
+                subtree: true
+            });
+        }
+    };
+
+    const disconnectObservers = (): void => {
+        observer?.disconnect();
+        colorSchemeObserver?.disconnect();
+        slotObserver?.disconnect();
+        styleSheetObserver?.disconnect();
+        syncSlotChangeListeners([]);
+        syncStyleSheetLoadListeners([]);
+        observedEditorTextArea = undefined;
+        observedMutationRoots = [];
+        observedColorSchemeElements = [];
+        observedSlotElements = [];
+        observedSlotRoots = [];
+        observedStyleSheetRoots = [];
     };
 
     const observeEditorRoot = (editor: FormattingToolbarEditor): FormattingToolbarEditor | undefined => {
@@ -949,22 +1277,18 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         }
         const shadowRoots = getEditorShadowRoots(editor);
         syncSelectionChangeRoots(shadowRoots);
-        observer?.disconnect();
-        observeMutationRoot(initialDocument);
-        if (ownerDocument !== initialDocument) {
-            observeMutationRoot(ownerDocument);
-        }
-        for (const root of shadowRoots) {
-            observeMutationRoot(root);
-        }
-        observer?.observe(editor.textArea, { attributes: true });
+        syncMutationObservation(editor, shadowRoots);
+        syncColorSchemeObservation(editor.textArea);
+        syncSlotObservation(editor.textArea);
+        syncStyleSheetObservation(editor.textArea);
         return undefined;
     };
 
     const retainDiscoveryDocument = (): void => {
         syncDocumentEventListeners();
         syncSelectionChangeRoots([]);
-        observer?.disconnect();
+        disconnectObservers();
+        removeColorSchemeMediaListener();
     };
 
     const isToolbarPlaced = (editor: FormattingToolbarEditor): boolean => {
@@ -981,6 +1305,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         if (!parent) {
             return;
         }
+        container.slot = editor.textArea.slot;
         if (editor.toolbarPlacement === "before-editor") {
             if (editor.textArea.previousSibling !== container) {
                 parent.insertBefore(container, editor.textArea);
@@ -1001,7 +1326,10 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         retainDiscoveryDocument();
     };
 
-    const activateEditor = (editor: FormattingToolbarEditor): FormattingToolbarEditor => {
+    const activateEditor = (
+        editor: FormattingToolbarEditor,
+        isColorSchemeRefreshRequested: boolean = true
+    ): FormattingToolbarEditor => {
         const isSameEditor = activeEditor?.textArea === editor.textArea;
         const root = getEditorRoot(editor.textArea);
         const isRootChanged = root !== renderedToolbarRoot;
@@ -1030,6 +1358,10 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         if (destinationEditor && destinationEditor.textArea !== editor.textArea) {
             return activateEditor(destinationEditor);
         }
+        syncColorSchemeMediaQuery(editor.textArea.ownerDocument.defaultView);
+        if (isColorSchemeRefreshRequested) {
+            refreshActiveColorScheme(editor);
+        }
         if (!isSameEditor || isRootChanged || !areMenuIdsCurrent || isCommandPresentationChanged) {
             renderCommands(editor.commandRegistry, root);
         }
@@ -1039,7 +1371,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         return editor;
     };
 
-    function reconcileActiveEditor(): FormattingToolbarEditor | null {
+    function reconcileActiveEditor(isColorSchemeRefreshRequested: boolean = true): FormattingToolbarEditor | null {
         const textArea = activeEditor?.textArea;
         const isBrowsingContextConnected =
             textArea !== undefined && isDocumentBrowsingContextConnected(textArea.ownerDocument, initialDocument);
@@ -1057,7 +1389,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
             removeToolbar();
             return null;
         }
-        return activateEditor(resolvedEditor);
+        return activateEditor(resolvedEditor, isColorSchemeRefreshRequested);
     }
 
     const executeToolbarCommand = (commandId: string): void => {
@@ -1409,25 +1741,218 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         }
     };
 
-    const handleMutation = (records: readonly MutationRecord[]): void => {
-        if (isDisposed) {
-            return;
+    const collectMenuPanelIds = (): ReadonlySet<string> =>
+        new Set([stylePanel?.id, morePanel?.id].filter((id): id is string => Boolean(id)));
+
+    const doesNodeContainId = (node: Node, ids: ReadonlySet<string>): boolean => {
+        if (!isElement(node) || ids.size === 0) {
+            return false;
         }
-        const textArea = activeEditor?.textArea;
-        const isRelevant = records.some((record) => {
-            if (record.type === "childList") {
-                return !isNode(record.target) || !container.contains(record.target);
-            }
-            if (record.type !== "attributes") {
-                return false;
-            }
-            if (record.target === textArea) {
+        if (ids.has(node.id)) {
+            return true;
+        }
+        return Array.from(node.querySelectorAll<HTMLElement>("[id]")).some((element) => ids.has(element.id));
+    };
+
+    const getOwnerFrameElement = (ownerDocument: Document): Element | null => {
+        try {
+            return ownerDocument.defaultView?.frameElement ?? null;
+        } catch {
+            return null;
+        }
+    };
+
+    const doesNodeContainTrackedEditorStructure = (node: Node, textArea: HTMLTextAreaElement): boolean => {
+        const ownerFrameElement = getOwnerFrameElement(textArea.ownerDocument);
+        if (node === textArea || node === ownerFrameElement || placedToolbarAncestors.includes(node)) {
+            return true;
+        }
+        return (
+            isElement(node) &&
+            (node.contains(textArea) ||
+                (ownerFrameElement !== null && node.contains(ownerFrameElement)) ||
+                placedToolbarAncestors.some((ancestor) => isNode(ancestor) && node.contains(ancestor)))
+        );
+    };
+
+    const isStructuralChildListMutation = (
+        record: MutationRecord,
+        editor: FormattingToolbarEditor,
+        menuPanelIds: ReadonlySet<string>
+    ): boolean => {
+        const textArea = editor.textArea;
+        if (!textArea.isConnected || !container.isConnected || !isToolbarPlaced(editor)) {
+            return true;
+        }
+        for (const node of [...record.addedNodes, ...record.removedNodes]) {
+            if (
+                node !== container &&
+                (doesNodeContainTrackedEditorStructure(node, textArea) || doesNodeContainId(node, menuPanelIds))
+            ) {
                 return true;
             }
-            return record.attributeName === "id" && !container.contains(record.target);
-        });
+        }
+        return false;
+    };
+
+    const handleMutation = (records: readonly MutationRecord[]): void => {
+        const editor = activeEditor;
+        if (isDisposed || !editor) {
+            return;
+        }
+        const menuPanelIds = collectMenuPanelIds();
+        let isColorSchemeRefreshRequested = false;
+        let isRelevant = false;
+        for (const record of records) {
+            if (record.type === "childList") {
+                if (isNode(record.target) && container.contains(record.target)) {
+                    continue;
+                }
+                const isStructuralMutation = isStructuralChildListMutation(record, editor, menuPanelIds);
+                isRelevant ||= isStructuralMutation;
+                isColorSchemeRefreshRequested ||= isStructuralMutation;
+                continue;
+            }
+            if (record.type !== "attributes" || container.contains(record.target)) {
+                continue;
+            }
+            if (record.target === editor.textArea) {
+                isRelevant = true;
+                isColorSchemeRefreshRequested ||= record.attributeName === "slot";
+                continue;
+            }
+            if (
+                record.attributeName === "id" &&
+                isElement(record.target) &&
+                (menuPanelIds.has(record.target.id) || (record.oldValue !== null && menuPanelIds.has(record.oldValue)))
+            ) {
+                isRelevant = true;
+            }
+        }
         if (isRelevant) {
-            reconcileActiveEditor();
+            reconcileActiveEditor(isColorSchemeRefreshRequested);
+        }
+    };
+
+    const handleColorSchemeMutation = (records: readonly MutationRecord[]): void => {
+        const editor = activeEditor;
+        if (
+            isDisposed ||
+            !editor ||
+            !records.some(
+                (record) =>
+                    record.type === "attributes" &&
+                    isElement(record.target) &&
+                    isColorSchemeSignalAttribute(record.attributeName) &&
+                    isColorSchemeSignalElement(record.target, editor.textArea)
+            )
+        ) {
+            return;
+        }
+        refreshActiveColorScheme(editor);
+    };
+
+    const doesNodeContainSlotElement = (node: Node): boolean =>
+        (isElement(node) && node.localName === "slot") || (isElement(node) && node.querySelector("slot") !== null);
+
+    const isSlotScopeMutation = (record: MutationRecord): boolean => {
+        if (record.type === "childList") {
+            return [...record.addedNodes, ...record.removedNodes].some(doesNodeContainSlotElement);
+        }
+        if (record.type !== "attributes" || !isElement(record.target)) {
+            return false;
+        }
+        return (
+            record.attributeName === "slot" || (record.target.localName === "slot" && record.attributeName === "name")
+        );
+    };
+
+    const handleSlotMutation = (records: readonly MutationRecord[]): void => {
+        const editor = activeEditor;
+        if (isDisposed || !editor || !records.some(isSlotScopeMutation)) {
+            return;
+        }
+        syncColorSchemeObservation(editor.textArea);
+        syncSlotObservation(editor.textArea);
+        syncStyleSheetObservation(editor.textArea);
+        refreshActiveColorScheme(editor);
+    };
+
+    function handleSlotChange(event: Event): void {
+        const editor = activeEditor;
+        if (isDisposed || !editor || handledSlotChangeEvents.has(event)) {
+            return;
+        }
+        handledSlotChangeEvents.add(event);
+        syncColorSchemeObservation(editor.textArea);
+        syncSlotObservation(editor.textArea);
+        syncStyleSheetObservation(editor.textArea);
+        refreshActiveColorScheme(editor);
+    }
+
+    const isStyleElement = (value: unknown): value is HTMLStyleElement =>
+        isElement(value) && value.localName === "style";
+
+    const hasStyleSheetRel = (relValue: string | null): boolean =>
+        (relValue ?? "").split(/[\t\n\f\r ]+/).some((token) => token.toLowerCase() === "stylesheet");
+
+    const isStyleSheetLink = (value: unknown): value is HTMLLinkElement =>
+        isElement(value) && value.localName === "link" && hasStyleSheetRel(value.getAttribute("rel"));
+
+    const handleStyleSheetLoad = (event: Event): void => {
+        const editor = activeEditor;
+        if (!isDisposed && editor && isStyleSheetLink(event.target) && !container.contains(event.target)) {
+            refreshActiveColorScheme(editor);
+        }
+    };
+
+    const doesNodeContainStyleSheetElement = (node: Node): boolean => {
+        if (isStyleElement(node) || isStyleSheetLink(node)) {
+            return true;
+        }
+        return (
+            isElement(node) &&
+            node !== container &&
+            Array.from(node.querySelectorAll("style, link")).some(
+                (element) => isStyleElement(element) || isStyleSheetLink(element)
+            )
+        );
+    };
+
+    const isStyleSheetMutation = (record: MutationRecord): boolean => {
+        if (record.type === "characterData") {
+            return isStyleElement(record.target.parentElement);
+        }
+        if (record.type === "childList") {
+            if (isStyleElement(record.target)) {
+                return true;
+            }
+            return [...record.addedNodes, ...record.removedNodes].some(
+                (node) => node !== container && !container.contains(node) && doesNodeContainStyleSheetElement(node)
+            );
+        }
+        if (record.type !== "attributes") {
+            return false;
+        }
+        if (isStyleElement(record.target)) {
+            return record.attributeName === "media" || record.attributeName === "disabled";
+        }
+        if (!isElement(record.target) || record.target.localName !== "link") {
+            return false;
+        }
+        if (record.attributeName === "rel") {
+            return isStyleSheetLink(record.target) || hasStyleSheetRel(record.oldValue);
+        }
+        return (
+            isStyleSheetLink(record.target) &&
+            STYLE_SHEET_SIGNAL_ATTRIBUTES.some((attributeName) => attributeName === record.attributeName)
+        );
+    };
+
+    const handleStyleSheetMutation = (records: readonly MutationRecord[]): void => {
+        const editor = activeEditor;
+        if (!isDisposed && editor && records.some(isStyleSheetMutation)) {
+            refreshActiveColorScheme(editor);
         }
     };
 
@@ -1528,6 +2053,9 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     };
 
     observer = new MutationObserver(handleMutation);
+    colorSchemeObserver = new MutationObserver(handleColorSchemeMutation);
+    slotObserver = new MutationObserver(handleSlotMutation);
+    styleSheetObserver = new MutationObserver(handleStyleSheetMutation);
     syncDocumentEventListeners();
     container.addEventListener("pointerdown", handleToolbarPointerDown);
     container.addEventListener("mousedown", handleToolbarPointerDown);
@@ -1538,7 +2066,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
 
     return () => {
         isDisposed = true;
-        observer?.disconnect();
+        disconnectObservers();
         unsubscribeSettings?.();
         syncDocumentEventListeners();
         unsubscribeKeydown();

@@ -24,6 +24,8 @@
         "applyBlockStyle = (",
         "applyBlockStyleCommand = (",
         "getActiveBlockStyle = (",
+        "resolveActiveColorScheme",
+        "data-tampermonkey-markdown-enhancer-color-scheme",
         "Style:",
         "menuitemradio",
         "continueMarkdownLine",
