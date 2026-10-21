@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import caretDownIconRaw from "../assets/phosphor-icons/bold/caret-down-bold.svg?raw";
 import codeBlockIconRaw from "../assets/phosphor-icons/bold/code-block-bold.svg?raw";
 import codeIconRaw from "../assets/phosphor-icons/bold/code-bold.svg?raw";
 import commandIconRaw from "../assets/phosphor-icons/bold/command-bold.svg?raw";
@@ -8,6 +9,7 @@ import listBulletsIconRaw from "../assets/phosphor-icons/bold/list-bullets-bold.
 import listChecksIconRaw from "../assets/phosphor-icons/bold/list-checks-bold.svg?raw";
 import listNumbersIconRaw from "../assets/phosphor-icons/bold/list-numbers-bold.svg?raw";
 import quotesIconRaw from "../assets/phosphor-icons/bold/quotes-bold.svg?raw";
+import selectionIconRaw from "../assets/phosphor-icons/bold/selection-bold.svg?raw";
 import textBoldIconRaw from "../assets/phosphor-icons/bold/text-b-bold.svg?raw";
 import textHeadingFiveIconRaw from "../assets/phosphor-icons/bold/text-h-five-bold.svg?raw";
 import textHeadingFourIconRaw from "../assets/phosphor-icons/bold/text-h-four-bold.svg?raw";
@@ -17,11 +19,16 @@ import textHeadingThreeIconRaw from "../assets/phosphor-icons/bold/text-h-three-
 import textHeadingTwoIconRaw from "../assets/phosphor-icons/bold/text-h-two-bold.svg?raw";
 import textItalicIconRaw from "../assets/phosphor-icons/bold/text-italic-bold.svg?raw";
 import textStrikethroughIconRaw from "../assets/phosphor-icons/bold/text-strikethrough-bold.svg?raw";
+import textTIconRaw from "../assets/phosphor-icons/bold/text-t-bold.svg?raw";
 import { EDITOR_COMMAND_IDS } from "./command-registry";
 import {
+    createToolbarBlockStyleIcon,
+    createToolbarCaretDownIcon,
     createToolbarCommandIcon,
     createToolbarIconFromRawSvg,
+    createToolbarMixedIcon,
     createToolbarMoreIcon,
+    createToolbarTextIcon,
     TOOLBAR_ICON_CLASS
 } from "./formatting-toolbar-icons";
 
@@ -31,6 +38,7 @@ const CORE_ICON_CASES: ReadonlyArray<readonly [string, string]> = [
     [EDITOR_COMMAND_IDS.strikethrough, textStrikethroughIconRaw],
     [EDITOR_COMMAND_IDS.inlineCode, codeIconRaw],
     [EDITOR_COMMAND_IDS.link, linkIconRaw],
+    [EDITOR_COMMAND_IDS.text, textTIconRaw],
     [EDITOR_COMMAND_IDS.codeBlock, codeBlockIconRaw],
     [EDITOR_COMMAND_IDS.heading1, textHeadingOneIconRaw],
     [EDITOR_COMMAND_IDS.heading2, textHeadingTwoIconRaw],
@@ -71,49 +79,63 @@ describe("Formatting toolbar icons", () => {
         }
     );
 
+    test("maps Heading 1 block style independently from contributed command IDs", () => {
+        expectIconToMatchRawSvg(createToolbarBlockStyleIcon("heading1"), textHeadingOneIconRaw);
+        expectIconToMatchRawSvg(createToolbarCommandIcon("custom.heading-one"), commandIconRaw);
+    });
+
     test.each([
         ["parser errors", '<svg xmlns="http://www.w3.org/2000/svg"><path>'],
-        ["scripts", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><script/></svg>'],
+        [
+            "scripts",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><script/></svg>'
+        ],
         [
             "foreign objects",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><foreignObject/></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><foreignObject/></svg>'
         ],
-        ["iframes", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><iframe/></svg>'],
-        ["objects", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><object/></svg>'],
-        ["embeds", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><embed/></svg>'],
-        ["images", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><image/></svg>'],
-        ["uses", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><use/></svg>'],
+        [
+            "iframes",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><iframe/></svg>'
+        ],
+        [
+            "objects",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><object/></svg>'
+        ],
+        ["embeds", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><embed/></svg>'],
+        ["images", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><image/></svg>'],
+        ["uses", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><use/></svg>'],
         [
             "event attributes",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor" onload="alert(1)"><path d="M0 0"/></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" onload="alert(1)"><path d="M0 0"/></svg>'
         ],
         [
             "href attributes",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><path d="M0 0" href="https://example.com"/></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0" href="https://example.com"/></svg>'
         ],
         [
             "xlink href attributes",
-            '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1 1" fill="currentColor"><path d="M0 0" xlink:href="https://example.com"/></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0" xlink:href="https://example.com"/></svg>'
         ],
         [
             "src attributes",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><path d="M0 0" src="https://example.com"/></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0" src="https://example.com"/></svg>'
         ],
         [
             "style attributes",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><path d="M0 0" style="fill:url(https://example.com)"/></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0" style="fill:url(https://example.com)"/></svg>'
         ],
         [
             "URL-valued paint attributes",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="url(https://example.com)"><path d="M0 0"/></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="url(https://example.com)"><path d="M0 0"/></svg>'
         ],
         [
             "titles",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><title>Unsafe title</title></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><title>Unsafe title</title></svg>'
         ],
         [
             "text",
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><text>Unsafe text</text></svg>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><text>Unsafe text</text></svg>'
         ]
     ])("uses the safe command fallback for %s", (_caseName, rawSvg) => {
         const icon = createToolbarIconFromRawSvg(rawSvg);
@@ -126,8 +148,157 @@ describe("Formatting toolbar icons", () => {
         expect(icon.outerHTML).not.toContain("url(");
     });
 
+    test.each([
+        [
+            "a different viewBox",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "a tab-normalized viewBox",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0\t0 256 256" fill="currentColor"><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "an entity-normalized viewBox",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0&#x20;0 256 256" fill="currentColor"><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "a document comment",
+            '<!-- -->\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "a document processing instruction",
+            '<?icon value?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "a root comment",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><!-- --><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "a root processing instruction",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><?icon value?><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "whitespace-only root CDATA",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><![CDATA[   ]]><path d="M0 0H1Z"/></svg>'
+        ],
+        [
+            "a path comment",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0H1Z"><!-- --></path></svg>'
+        ],
+        [
+            "a path processing instruction",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0H1Z"><?icon value?></path></svg>'
+        ],
+        [
+            "whitespace-only path CDATA",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0H1Z"><![CDATA[   ]]></path></svg>'
+        ],
+        ["no direct path", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"></svg>'],
+        [
+            "an empty path",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d=""/></svg>'
+        ],
+        [
+            "a whitespace-only path",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="   "/></svg>'
+        ],
+        [
+            "invalid path text",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="not-a-path"/></svg>'
+        ],
+        [
+            "an incomplete path command",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0"/></svg>'
+        ],
+        [
+            "a leading path comma",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d=",M0 0H1Z"/></svg>'
+        ],
+        [
+            "repeated path commas",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0,,0H1Z"/></svg>'
+        ],
+        [
+            "a trailing path comma",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0H1Z,"/></svg>'
+        ],
+        [
+            "a nested path",
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><g><path d="M0 0H1Z"/></g></svg>'
+        ]
+    ])("uses the safe command fallback for %s", (_caseName, rawSvg) => {
+        expectIconToMatchRawSvg(createToolbarIconFromRawSvg(rawSvg), commandIconRaw);
+    });
+
+    test("preserves a valid exact-viewBox SVG with multiple direct paths", () => {
+        const rawSvg =
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0H1Z"/><path d="M2 2L3 3Z"/></svg>';
+
+        expectIconToMatchRawSvg(createToolbarIconFromRawSvg(rawSvg), rawSvg);
+    });
+
+    test("preserves whitespace text nodes around direct paths", () => {
+        const rawSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor">
+                <path d="M0 0H1Z"> </path>
+                <path d="M2 2L3 3Z"/>
+            </svg>
+        `;
+
+        expectIconToMatchRawSvg(createToolbarIconFromRawSvg(rawSvg), rawSvg);
+    });
+
+    test("preserves valid compact arc flags and coordinates", () => {
+        const rawSvg =
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0A1 1 0 011 1"/></svg>';
+
+        expectIconToMatchRawSvg(createToolbarIconFromRawSvg(rawSvg), rawSvg);
+    });
+
+    test("preserves exponent signs in unsigned arc radii and signed coordinates", () => {
+        const rawSvg =
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M0 0A1e+1 1e-1 0 0 1 -2e+2 3e-2"/></svg>';
+
+        expectIconToMatchRawSvg(createToolbarIconFromRawSvg(rawSvg), rawSvg);
+    });
+
+    test.each([
+        ["an explicitly positive radius", "M0 0A+1 1 0 0 1 2 3"],
+        ["a negative-zero radius", "M0 0A-0 1 0 0 1 2 3"]
+    ])("uses the safe command fallback for %s", (_caseName, pathData) => {
+        const rawSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="${pathData}"/></svg>`;
+
+        expectIconToMatchRawSvg(createToolbarIconFromRawSvg(rawSvg), commandIconRaw);
+    });
+
     test("uses the dots-three icon for More", () => {
         expectIconToMatchRawSvg(createToolbarMoreIcon(), dotsThreeIconRaw);
+    });
+
+    test.each([
+        [
+            "Text",
+            createToolbarTextIcon,
+            textTIconRaw,
+            "ca48a422f871e674081c74d6b29fdfd04b7aa86604e0acdab64387146bc7124b"
+        ],
+        [
+            "Mixed",
+            createToolbarMixedIcon,
+            selectionIconRaw,
+            "bca7ab4688ca03ed591ba3cfba90bda277b25596b649898388c51aebc7742fb3"
+        ],
+        [
+            "Caret Down",
+            createToolbarCaretDownIcon,
+            caretDownIconRaw,
+            "76a97545e1b923bc13bcc15d7bcbb7f5530105e6eaa98a18c1e30d23e3622843"
+        ]
+    ] as const)("uses the exact pinned %s icon", async (_label, createIcon, rawSvg, expectedHash) => {
+        expectIconToMatchRawSvg(createIcon(), rawSvg);
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawSvg));
+        const actualHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+        expect(actualHash).toBe(expectedHash);
     });
 
     test("returns fresh, presentation-only 16px current-color SVG elements", () => {
@@ -148,6 +319,9 @@ describe("Formatting toolbar icons", () => {
         const fetchRequest = vi.spyOn(globalThis, "fetch");
         const icons = [
             ...CORE_ICON_CASES.map(([commandId]) => createToolbarCommandIcon(commandId)),
+            createToolbarTextIcon(),
+            createToolbarMixedIcon(),
+            createToolbarCaretDownIcon(),
             createToolbarMoreIcon()
         ];
 

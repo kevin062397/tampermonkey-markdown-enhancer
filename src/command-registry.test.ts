@@ -30,7 +30,7 @@ describe("Command registry", () => {
             { id: EDITOR_COMMAND_IDS.bold, label: "Bold" },
             { id: EDITOR_COMMAND_IDS.italic, label: "Italic" },
             { id: EDITOR_COMMAND_IDS.strikethrough, label: "Strikethrough" },
-            { id: EDITOR_COMMAND_IDS.inlineCode, label: "Inline code" },
+            { id: EDITOR_COMMAND_IDS.inlineCode, label: "Inline Code" },
             { id: EDITOR_COMMAND_IDS.link, label: "Link" },
             { id: EDITOR_COMMAND_IDS.text, label: "Text" },
             { id: EDITOR_COMMAND_IDS.heading1, label: "Heading 1" },
@@ -40,10 +40,10 @@ describe("Command registry", () => {
             { id: EDITOR_COMMAND_IDS.heading5, label: "Heading 5" },
             { id: EDITOR_COMMAND_IDS.heading6, label: "Heading 6" },
             { id: EDITOR_COMMAND_IDS.blockquote, label: "Blockquote" },
-            { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code block" },
-            { id: EDITOR_COMMAND_IDS.bulletList, label: "Bullet list" },
-            { id: EDITOR_COMMAND_IDS.numberedList, label: "Numbered list" },
-            { id: EDITOR_COMMAND_IDS.taskList, label: "Task list" }
+            { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code Block" },
+            { id: EDITOR_COMMAND_IDS.bulletList, label: "Bullet List" },
+            { id: EDITOR_COMMAND_IDS.numberedList, label: "Numbered List" },
+            { id: EDITOR_COMMAND_IDS.taskList, label: "Task List" }
         ]);
         expect(registry.findCommandByShortcut("B", true, context)?.id).toBe(EDITOR_COMMAND_IDS.bold);
         expect(registry.findCommandByShortcut("i", true, context)?.id).toBe(EDITOR_COMMAND_IDS.italic);

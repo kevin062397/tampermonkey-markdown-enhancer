@@ -10,6 +10,7 @@ The formatting toolbar includes selected SVG assets from `@phosphor-icons/core` 
 - Package integrity: `sha512-v4ARvrip4qBCImOE5rmPUylOEK4iiED9ZyKjcvzuezqMaiRASCHKcRIuvvxL/twvLpkfnEODCOJp5dM4eZilxQ==`
 - Upstream asset path: `assets/bold/` in the published package
 - Vendored files and SHA-256 hashes:
+    - `assets/phosphor-icons/bold/caret-down-bold.svg`: `76a97545e1b923bc13bcc15d7bcbb7f5530105e6eaa98a18c1e30d23e3622843`
     - `assets/phosphor-icons/bold/code-block-bold.svg`: `ee11e03e6a6c72b017f44e933310fde46e3668cdc7d16356df9094ad18c69bd6`
     - `assets/phosphor-icons/bold/code-bold.svg`: `9ea667d9633ab1e91b17f5779ad379e2bf46f24baca533f5267dd61d8fea7056`
     - `assets/phosphor-icons/bold/command-bold.svg`: `b743fc31d32c33e797b8e44e83134f96dae5a9ee4e118f85c6503c8eae84c924`
@@ -19,6 +20,7 @@ The formatting toolbar includes selected SVG assets from `@phosphor-icons/core` 
     - `assets/phosphor-icons/bold/list-checks-bold.svg`: `7187057b879015089b18a8e8469496a84c68662c03379cba2ef684fb37cda905`
     - `assets/phosphor-icons/bold/list-numbers-bold.svg`: `b85c90f81d3d2f81b54e4af1732847c4b860761c2e4aa4f174dbe9cfe4e24500`
     - `assets/phosphor-icons/bold/quotes-bold.svg`: `3a7005c35862a14005a9abc79b391b3750fc4977f66a420094fe9ea46f28fe94`
+    - `assets/phosphor-icons/bold/selection-bold.svg`: `bca7ab4688ca03ed591ba3cfba90bda277b25596b649898388c51aebc7742fb3`
     - `assets/phosphor-icons/bold/text-b-bold.svg`: `96f2d8e33cb9871c4d0a9ca477f0225e249b45bcb45ea837df42b69be51b201f`
     - `assets/phosphor-icons/bold/text-h-five-bold.svg`: `50668988861b3c94f09e0ed12d08ef4e6ff59404d8dc98ca19a280985202863d`
     - `assets/phosphor-icons/bold/text-h-four-bold.svg`: `e3b2d28d2f92e6e2727e70128c5b955abdc7cc2b48e0b9e1d8fdd822c0d0a834`
@@ -28,6 +30,7 @@ The formatting toolbar includes selected SVG assets from `@phosphor-icons/core` 
     - `assets/phosphor-icons/bold/text-h-two-bold.svg`: `5463e52e7db6bea14b003a9f583f5ef9e900b1c4d81cc0c8fa36ac8da2f2791a`
     - `assets/phosphor-icons/bold/text-italic-bold.svg`: `80fac56bbbb79b482882baaf90ca4f486c8298640e1663e73b4ca68b6d76df3f`
     - `assets/phosphor-icons/bold/text-strikethrough-bold.svg`: `5d038bffad3817c57c938db2bb2df9dabd6532469a986dd4415a0d99054697a3`
+    - `assets/phosphor-icons/bold/text-t-bold.svg`: `ca48a422f871e674081c74d6b29fdfd04b7aa86604e0acdab64387146bc7124b`
 
 ### MIT License
 

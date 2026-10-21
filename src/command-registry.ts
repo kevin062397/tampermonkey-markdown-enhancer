@@ -103,10 +103,10 @@ const BLOCK_STYLE_COMMAND_METADATA: Readonly<
     heading5: { id: EDITOR_COMMAND_IDS.heading5, label: "Heading 5" },
     heading6: { id: EDITOR_COMMAND_IDS.heading6, label: "Heading 6" },
     blockquote: { id: EDITOR_COMMAND_IDS.blockquote, label: "Blockquote" },
-    codeBlock: { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code block" },
-    bulletList: { id: EDITOR_COMMAND_IDS.bulletList, label: "Bullet list" },
-    numberedList: { id: EDITOR_COMMAND_IDS.numberedList, label: "Numbered list" },
-    taskList: { id: EDITOR_COMMAND_IDS.taskList, label: "Task list" }
+    codeBlock: { id: EDITOR_COMMAND_IDS.codeBlock, label: "Code Block" },
+    bulletList: { id: EDITOR_COMMAND_IDS.bulletList, label: "Bullet List" },
+    numberedList: { id: EDITOR_COMMAND_IDS.numberedList, label: "Numbered List" },
+    taskList: { id: EDITOR_COMMAND_IDS.taskList, label: "Task List" }
 };
 
 const createBlockStyleCommand = (blockStyle: ConcreteBlockStyle, bulletStyle: BulletStyle): EditorCommand => {
@@ -137,7 +137,7 @@ const createCoreCommands = (
     createFormattingCommand(EDITOR_COMMAND_IDS.strikethrough, "Strikethrough", "~~"),
     {
         id: EDITOR_COMMAND_IDS.inlineCode,
-        label: "Inline code",
+        label: "Inline Code",
         isAvailable: isFormattingAvailable,
         execute: ({ textArea }) => toggleInlineCodeCommand(textArea)
     },
