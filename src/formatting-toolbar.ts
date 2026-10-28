@@ -819,6 +819,11 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
         }
     };
 
+    const dismissOpenMenusFromTrigger = (shouldFocusTrigger: boolean): void => {
+        closeOpenMenus(shouldFocusTrigger);
+        savedSelection = undefined;
+    };
+
     const createStyleTriggerIcon = (blockStyle: ActiveBlockStyle): SVGSVGElement => {
         if (blockStyle === "mixed") {
             return createToolbarMixedIcon();
@@ -1685,7 +1690,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
             if (stylePanel?.hidden) {
                 openStyleMenu();
             } else {
-                closeOpenMenus(shouldRestorePointerToggleFocus);
+                dismissOpenMenusFromTrigger(shouldRestorePointerToggleFocus);
             }
             return;
         }
@@ -1696,7 +1701,7 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
             if (morePanel?.hidden) {
                 openMoreMenu(event.detail === 0 ? "first" : undefined);
             } else {
-                closeOpenMenus(shouldRestorePointerToggleFocus);
+                dismissOpenMenusFromTrigger(shouldRestorePointerToggleFocus);
             }
             return;
         }

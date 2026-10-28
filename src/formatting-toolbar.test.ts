@@ -887,6 +887,39 @@ describe("Formatting toolbar", () => {
         expect(document.activeElement).toBe(trigger);
     });
 
+    test("uses the current cursor after the Style trigger dismisses its menu", () => {
+        fixture = createFixture();
+        const textArea = createTextArea();
+        textArea.value = "- item\nplain";
+        textArea.setSelectionRange(2, 2);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        const trigger = getStyleTrigger(toolbar);
+        expect(trigger.textContent).toBe("Bullet List");
+
+        openStylePanel(toolbar);
+        trigger.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+        trigger.click();
+
+        textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+        textArea.focus();
+        expect(trigger.textContent).toBe("Text");
+
+        openStylePanel(toolbar);
+        const headingButton = getStylePanel(toolbar).querySelector<HTMLButtonElement>(
+            `button[data-command-id="${EDITOR_COMMAND_IDS.heading1}"]`
+        );
+        if (!headingButton) {
+            throw new Error("Expected Heading 1 command");
+        }
+        headingButton.click();
+
+        expect(textArea.value).toBe("- item\n# plain");
+    });
+
     test("restores the More trigger after a pointer toggle closes its focused panel when available", () => {
         fixture = createFixture(
             createCommandRegistry([
