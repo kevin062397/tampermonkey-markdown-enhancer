@@ -802,9 +802,21 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     const getCommandPresentation = (registry: EditorCommandRegistry): string =>
         JSON.stringify(registry.listCommands().map(({ id, label, blockStyle }) => [id, label, blockStyle ?? null]));
 
+    const releaseOpenMenuFocus = (): void => {
+        const activeElement = getDeepActiveElement(activeEditor?.textArea.ownerDocument ?? container.ownerDocument);
+        if (
+            isFocusableElement(activeElement) &&
+            typeof activeElement.blur === "function" &&
+            (stylePanel?.contains(activeElement) || morePanel?.contains(activeElement))
+        ) {
+            activeElement.blur();
+        }
+    };
+
     const closeOpenMenus = (shouldFocusTrigger = false): void => {
         const openTrigger = getOpenMenuTrigger();
         removeOutsidePointerDismissal();
+        releaseOpenMenuFocus();
         if (stylePanel && styleTrigger) {
             stylePanel.hidden = true;
             styleTrigger.setAttribute("aria-expanded", "false");

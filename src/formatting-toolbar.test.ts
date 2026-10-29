@@ -1927,6 +1927,9 @@ describe("Formatting toolbar", () => {
         const host = document.createElement("section");
         host.dataset.theme = "dark";
         const shadowRoot = host.attachShadow({ mode: "open" });
+        const darkSlot = document.createElement("slot");
+        darkSlot.name = "editor";
+        shadowRoot.append(darkSlot);
         const wrapper = document.createElement("div");
         wrapper.slot = "editor";
         const textArea = document.createElement("textarea");
@@ -1939,7 +1942,7 @@ describe("Formatting toolbar", () => {
         if (!toolbar) {
             throw new Error("Expected toolbar");
         }
-        expect(wrapper.assignedSlot).toBeNull();
+        expect(wrapper.assignedSlot).toBe(darkSlot);
         expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
         expect(
             observeMutation.mock.calls.some(
@@ -1963,7 +1966,7 @@ describe("Formatting toolbar", () => {
         const lightSlot = document.createElement("slot");
         lightSlot.name = "editor";
         lightSlot.dataset.theme = "light";
-        shadowRoot.append(lightSlot);
+        shadowRoot.prepend(lightSlot);
         await flushMutationObserver();
 
         expect(wrapper.assignedSlot).toBe(lightSlot);
@@ -1973,7 +1976,7 @@ describe("Formatting toolbar", () => {
         lightSlot.remove();
         await flushMutationObserver();
 
-        expect(wrapper.assignedSlot).toBeNull();
+        expect(wrapper.assignedSlot).toBe(darkSlot);
         expect(fixture.getToolbar()).toBe(toolbar);
         expect(toolbar.dataset.tampermonkeyMarkdownEnhancerColorScheme).toBe("dark");
     });
@@ -2439,7 +2442,8 @@ describe("Formatting toolbar", () => {
         const tabEvent = dispatchKeyboardEvent(firstMenuItem as HTMLButtonElement, "Tab");
         expect(tabEvent.defaultPrevented).toBe(false);
         expect(panel.hidden).toBe(true);
-        expect(document.activeElement).toBe(firstMenuItem);
+        expect(panel.contains(document.activeElement)).toBe(false);
+        expect(document.activeElement).not.toBe(trigger);
     });
 
     test("avoids Style menu ID collisions with host-page elements", () => {
