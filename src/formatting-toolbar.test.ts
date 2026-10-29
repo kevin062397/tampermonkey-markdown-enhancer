@@ -428,6 +428,49 @@ describe("Formatting toolbar", () => {
         expect(document.activeElement).toBe(textArea);
     });
 
+    test("uses verified transaction outcomes for toolbar commands", () => {
+        const registry = createCommandRegistry();
+        const executeCommand = vi.spyOn(registry, "executeCommand");
+        fixture = createFixture(registry);
+        const textArea = createTextArea();
+        textArea.value = "selected";
+        textArea.setSelectionRange(0, textArea.value.length);
+        textArea.focus();
+        const toolbar = fixture.getToolbar();
+        if (!toolbar) {
+            throw new Error("Expected toolbar");
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
+
+        try {
+            Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => true) });
+            const handleInput = vi.fn();
+            textArea.addEventListener("input", handleInput);
+            dispatchMouseActivation(getCommandButton(toolbar, EDITOR_COMMAND_IDS.bold));
+            expect(executeCommand.mock.results.at(-1)?.value).toBe(true);
+            expect(textArea.value).toBe("**selected**");
+            expect(handleInput).toHaveBeenCalledOnce();
+
+            textArea.value = "selected";
+            textArea.setSelectionRange(0, textArea.value.length);
+            textArea.dispatchEvent(new Event("select", { bubbles: true }));
+            Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => false) });
+            vi.spyOn(textArea, "setRangeText").mockImplementation(() => {
+                throw new Error("fallback unavailable");
+            });
+            expect(() => dispatchMouseActivation(getCommandButton(toolbar, EDITOR_COMMAND_IDS.bold))).not.toThrow();
+            expect(executeCommand.mock.results.at(-1)?.value).toBe(false);
+            expect(textArea.value).toBe("selected");
+            expect(handleInput).toHaveBeenCalledOnce();
+        } finally {
+            if (descriptor) {
+                Object.defineProperty(document, "execCommand", descriptor);
+            } else {
+                delete (document as unknown as { execCommand?: Document["execCommand"] }).execCommand;
+            }
+        }
+    });
+
     test("uses the pointerdown selection when the host changes selection before click", () => {
         fixture = createFixture();
         const textArea = createTextArea();

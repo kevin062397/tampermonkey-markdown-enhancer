@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createCommandRegistry } from "./command-registry";
 import { attachEditorEventRouter, type EditorEventResolver } from "./event-router";
 
@@ -65,6 +65,56 @@ afterEach(() => {
 });
 
 describe("Editor event router focus exit", () => {
+    test("routes keyboard defaults from verified transaction outcomes", () => {
+        const textArea = createTextArea();
+        disposeRouter = attachEditorEventRouter(createResolver([textArea]));
+
+        resetTextArea(textArea);
+        textArea.setSelectionRange(0, textArea.value.length);
+        Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => true) });
+        const fallbackEvent = dispatchKey(textArea, "(");
+        expect(fallbackEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("(plain)");
+
+        resetTextArea(textArea);
+        textArea.setSelectionRange(0, textArea.value.length);
+        const executeDeclinedCommand = vi.fn(() => false);
+        Object.defineProperty(document, "execCommand", {
+            configurable: true,
+            value: executeDeclinedCommand
+        });
+        vi.spyOn(textArea, "setRangeText").mockImplementation(() => {
+            throw new Error("fallback unavailable");
+        });
+        const declinedEvent = dispatchKey(textArea, "(");
+        expect(declinedEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("plain");
+        resetTextArea(textArea);
+        const declinedTabEvent = dispatchKey(textArea, "Tab");
+        expect(declinedTabEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("plain");
+        resetTextArea(textArea, "- item");
+        const declinedMarkdownTabEvent = dispatchKey(textArea, "Tab");
+        expect(declinedMarkdownTabEvent.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("- item");
+        expect(executeDeclinedCommand).toHaveBeenCalledTimes(3);
+        vi.restoreAllMocks();
+
+        resetTextArea(textArea);
+        textArea.setSelectionRange(0, textArea.value.length);
+        Object.defineProperty(document, "execCommand", {
+            configurable: true,
+            value: vi.fn(() => {
+                textArea.value = "page value";
+                textArea.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+                return true;
+            })
+        });
+        const controlledEvent = dispatchKey(textArea, "(");
+        expect(controlledEvent.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("page value");
+    });
+
     test("allows one native Tab or Shift+Tab after Escape", () => {
         const textArea = createTextArea();
         disposeRouter = attachEditorEventRouter(createResolver([textArea]));

@@ -1,6 +1,6 @@
 import { applyBlockStyle, type ConcreteBlockStyle } from "./block-styles";
 import { toggleFencedCodeBlock, toggleInlineCode } from "./code-formatting";
-import { applyEditTransaction } from "./edit-transaction";
+import { applyEditTransaction, isEditTransactionHandled } from "./edit-transaction";
 import { readEditorState, type EditorTransform } from "./editor-state";
 import { toggleLinePrefix, type BulletStyle, type LinePrefixKind } from "./line-prefixes";
 import { continueMarkdownLine, indentMarkdownLine } from "./markdown-lines";
@@ -21,8 +21,7 @@ const executeTransform = (textArea: HTMLTextAreaElement, transform: EditorTransf
     if (!operation) {
         return false;
     }
-    applyEditTransaction(textArea, operation);
-    return true;
+    return isEditTransactionHandled(applyEditTransaction(textArea, operation));
 };
 
 export const skipClosingPairCommand = (textArea: HTMLTextAreaElement, character: string): boolean =>
@@ -57,6 +56,9 @@ export const toggleLinePrefixCommand = (
 
 export const continueMarkdownLineCommand = (textArea: HTMLTextAreaElement): boolean =>
     executeTransform(textArea, continueMarkdownLine);
+
+export const indentMarkdownOrInsertSpacesCommand = (textArea: HTMLTextAreaElement, tabSize: number): boolean =>
+    executeTransform(textArea, (state) => indentMarkdownLine(state, tabSize) ?? insertSpaces(state, tabSize));
 
 export const indentMarkdownLineCommand = (textArea: HTMLTextAreaElement, tabSize: number): boolean =>
     executeTransform(textArea, (state) => indentMarkdownLine(state, tabSize));

@@ -35,6 +35,7 @@
         "generic-textarea",
         "shouldDispatchChangeEventAfterEdit",
         "isTextReplacementRequired",
+        "isEditTransactionHandled",
         "addEventListener(\"keydown\"",
         "addEventListener(\"paste\""
     ],

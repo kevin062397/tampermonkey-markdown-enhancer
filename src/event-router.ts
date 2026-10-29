@@ -3,8 +3,7 @@ import {
     continueMarkdownLineCommand,
     deleteEmptyPairCommand,
     indentCommand,
-    indentMarkdownLineCommand,
-    insertSpacesCommand,
+    indentMarkdownOrInsertSpacesCommand,
     outdentCommand,
     pasteMarkdownLinkCommand,
     skipClosingPairCommand,
@@ -100,17 +99,21 @@ const handleEditorKeydown = (
     }
 
     const wrapCharacters = WRAP_CHARACTERS[event.key];
-    if (wrapCharacters && isEditingModifierAllowed && (isSelectionPresent || !wrapCharacters.isSelectionRequired)) {
+    if (
+        wrapCharacters &&
+        isEditingModifierAllowed &&
+        (isSelectionPresent || !wrapCharacters.isSelectionRequired) &&
+        wrapSelectionCommand(textArea, wrapCharacters.leading, wrapCharacters.trailing)
+    ) {
         event.preventDefault();
-        wrapSelectionCommand(textArea, wrapCharacters.leading, wrapCharacters.trailing);
     }
 
     if (event.key === "Tab" && !event.shiftKey && isEditingModifierAllowed) {
-        event.preventDefault();
-        if (isSelectionPresent) {
-            indentCommand(textArea, tabWidth);
-        } else if (!indentMarkdownLineCommand(textArea, tabWidth)) {
-            insertSpacesCommand(textArea, tabWidth);
+        const isTabHandled = isSelectionPresent
+            ? indentCommand(textArea, tabWidth)
+            : indentMarkdownOrInsertSpacesCommand(textArea, tabWidth);
+        if (isTabHandled) {
+            event.preventDefault();
         }
     }
 
