@@ -125,7 +125,7 @@ describe("Settings", () => {
                 ...createDefaultSettings(),
                 shortcutOverrides: duplicateShortcuts
             }).shortcutOverrides
-        ).toEqual({ bold: { key: "x", isPrimaryModifierRequired: true } });
+        ).toEqual({});
         expect(
             normalizeSettings({
                 ...createDefaultSettings(),
@@ -135,7 +135,19 @@ describe("Settings", () => {
                     bold: duplicateShortcuts.bold
                 }
             }).shortcutOverrides
-        ).toEqual({ bold: { key: "x", isPrimaryModifierRequired: true } });
+        ).toEqual({});
+    });
+
+    test("removes every conflicting custom shortcut during legacy migration", () => {
+        expect(
+            normalizeSettings({
+                shortcutOverrides: {
+                    bold: { key: "x", isPrimaryModifierRequired: true },
+                    italic: { key: "x", isPrimaryModifierRequired: true },
+                    link: { key: "i", isPrimaryModifierRequired: true }
+                }
+            }).shortcutOverrides
+        ).toEqual({});
     });
 
     test("detects proposed collisions against complete effective shortcuts", () => {

@@ -14,6 +14,7 @@
         "initializeUserscript",
         "createSettingsStore",
         "hasPendingSettingsNotification",
+        "conflictingOverrideIds",
         "registerSettingsMenu",
         "Disable Markdown Editing",
         "Enable Markdown Editing",

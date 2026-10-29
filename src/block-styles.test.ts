@@ -570,6 +570,19 @@ describe("Block style edge cases", () => {
         expect([result.selectionStart, result.selectionEnd]).toEqual([0, 0]);
     });
 
+    test.each([
+        ["```\n```\n", 4, 4, "heading1", "# \n"],
+        ["```\r\n```\r\n", 5, 5, "heading1", "# \r\n"],
+        ["```\n```\n", 4, 4, "text", "\n"],
+        ["```\n```\n", 0, 1, "heading1", "\n"],
+        ["```\nbody\n```\n", 5, 5, "heading1", "# body\n"]
+    ] as const)(
+        "preserves the terminal separator when converting final fence %j to %s",
+        (value, selectionStart, selectionEnd, style, expected) => {
+            expect(executeStyle(createEditorState(value, selectionStart, selectionEnd), style).value).toBe(expected);
+        }
+    );
+
     test("keeps a converted empty fence marker separate from the following line", () => {
         const value = "before\n```\n```\r\nafter";
         const result = executeStyle(createEditorState(value, value.indexOf("```") + 1), "blockquote");

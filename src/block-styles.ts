@@ -23,523 +23,548 @@ export const ACTIVE_BLOCK_STYLES = [...CONCRETE_BLOCK_STYLES, "mixed"] as const;
 
 export type ActiveBlockStyle = (typeof ACTIVE_BLOCK_STYLES)[number];
 
-type LineBlockStyle = Exclude<ConcreteBlockStyle, "codeBlock">;
-
 interface DocumentLine {
+    readonly content: string;
     readonly start: number;
     readonly contentEnd: number;
-    readonly breakEnd: number;
-    readonly text: string;
+    readonly lineEnding: string;
 }
 
-interface FenceOpener {
+interface OpeningFence {
     readonly character: "`" | "~";
     readonly length: number;
 }
 
-interface FencedCodeBlock {
-    readonly id: number;
-    readonly startLine: number;
-    readonly endLine: number;
+interface FencedBlock {
+    readonly startLineIndex: number;
+    readonly endLineIndex: number;
     readonly contentStart: number;
     readonly contentEnd: number;
+    readonly end: number;
 }
 
-interface ParsedBlockMarker {
-    readonly style: Exclude<LineBlockStyle, "text">;
-    readonly startOffset: number;
-    readonly endOffset: number;
+interface LineBlockStyle {
+    readonly style: ConcreteBlockStyle;
+    readonly fencedBlockId: number | null;
 }
 
-interface TextChange {
+interface OuterMarker {
+    readonly style: Exclude<ConcreteBlockStyle, "text" | "codeBlock">;
     readonly start: number;
     readonly end: number;
-    readonly mapEnd?: number;
-    readonly text: string;
-    readonly mapPosition: (position: number) => number;
 }
 
-const THEMATIC_BREAK_PATTERN = /^(?:\*(?:[ \t]*\*){2,}|-(?:[ \t]*-){2,}|_(?:[ \t]*_){2,})[ \t]*$/;
+interface TextEdit {
+    readonly start: number;
+    readonly end: number;
+    readonly text: string;
+    readonly insertionAffinity?: "before" | "after";
+}
 
-const parseDocumentLines = (value: string): readonly DocumentLine[] => {
+const OPENING_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const CLOSING_FENCE_PATTERN = /^ {0,3}(`+|~+)[ \t]*$/;
+const THEMATIC_BREAK_PATTERN = /^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+const HEADING_PATTERN = /^(#{1,6})(?:[ \t]|$)/;
+const TASK_LIST_PATTERN = /^[-+*][ \t]+\[[ xX]\](?:[ \t]|$)/;
+const BULLET_LIST_PATTERN = /^[-+*](?:[ \t]|$)/;
+const NUMBERED_LIST_PATTERN = /^\d+[.)](?:[ \t]|$)/;
+const BLOCKQUOTE_PATTERN = /^>(?:[ \t])?/;
+
+const getDocumentLines = (value: string): readonly DocumentLine[] => {
     const lines: DocumentLine[] = [];
     let start = 0;
-
     while (start <= value.length) {
-        const lineFeed = value.indexOf("\n", start);
-        const rawContentEnd = lineFeed >= 0 ? lineFeed : value.length;
-        const contentEnd = value[rawContentEnd - 1] === "\r" ? rawContentEnd - 1 : rawContentEnd;
-        const breakEnd = lineFeed >= 0 ? lineFeed + 1 : value.length;
-        lines.push({ start, contentEnd, breakEnd, text: value.slice(start, contentEnd) });
-        if (lineFeed < 0) {
+        const lineFeedIndex = value.indexOf("\n", start);
+        const rawEnd = lineFeedIndex >= 0 ? lineFeedIndex : value.length;
+        const hasCarriageReturn = rawEnd > start && value[rawEnd - 1] === "\r";
+        const contentEnd = hasCarriageReturn ? rawEnd - 1 : rawEnd;
+        lines.push({
+            content: value.slice(start, contentEnd),
+            start,
+            contentEnd,
+            lineEnding: lineFeedIndex < 0 ? "" : hasCarriageReturn ? "\r\n" : "\n"
+        });
+        if (lineFeedIndex < 0) {
             break;
         }
-        start = breakEnd;
+        start = lineFeedIndex + 1;
     }
-
     return lines;
 };
 
-const parseFenceOpener = (line: string): FenceOpener | null => {
-    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+const getOpeningFence = (line: string): OpeningFence | null => {
+    const match = line.match(OPENING_FENCE_PATTERN);
     if (!match) {
         return null;
     }
 
-    const fence = match[1];
-    const character = fence[0] as "`" | "~";
-    const info = match[2];
-    if (character === "`" && info.includes("`")) {
-        return null;
-    }
-
-    return { character, length: fence.length };
+    const marker = match[1];
+    const character = marker[0] as "`" | "~";
+    const isBacktickInfoInvalid = character === "`" && match[2].includes("`");
+    return isBacktickInfoInvalid ? null : { character, length: marker.length };
 };
 
-const isFenceCloser = (line: string, opener: FenceOpener): boolean => {
-    const body = line.replace(/^ {0,3}/, "");
-    let length = 0;
-    while (body[length] === opener.character) {
-        length += 1;
+const isClosingFence = (line: string, openingFence: OpeningFence): boolean => {
+    const match = line.match(CLOSING_FENCE_PATTERN);
+    if (!match) {
+        return false;
     }
-    return length >= opener.length && /^[ \t]*$/.test(body.slice(length));
+
+    const marker = match[1];
+    return marker[0] === openingFence.character && marker.length >= openingFence.length;
 };
 
-const findFencedCodeBlocks = (lines: readonly DocumentLine[]): readonly FencedCodeBlock[] => {
-    const blocks: FencedCodeBlock[] = [];
+const findClosingFenceIndex = (
+    lines: readonly DocumentLine[],
+    openingLineIndex: number,
+    openingFence: OpeningFence
+): number => {
+    for (let lineIndex = openingLineIndex + 1; lineIndex < lines.length; lineIndex += 1) {
+        if (isClosingFence(lines[lineIndex].content, openingFence)) {
+            return lineIndex;
+        }
+    }
+    return -1;
+};
 
-    for (let startLine = 0; startLine < lines.length; startLine += 1) {
-        const opener = parseFenceOpener(lines[startLine].text);
-        if (!opener) {
+const findFencedBlocks = (lines: readonly DocumentLine[]): readonly FencedBlock[] => {
+    const blocks: FencedBlock[] = [];
+    let lineIndex = 0;
+    while (lineIndex < lines.length) {
+        const openingFence = getOpeningFence(lines[lineIndex].content);
+        if (!openingFence) {
+            lineIndex += 1;
             continue;
         }
 
-        let endLine = startLine + 1;
-        while (endLine < lines.length && !isFenceCloser(lines[endLine].text, opener)) {
-            endLine += 1;
-        }
-        if (endLine === lines.length) {
+        const closingLineIndex = findClosingFenceIndex(lines, lineIndex, openingFence);
+        if (closingLineIndex < 0) {
+            lineIndex += 1;
             continue;
         }
 
-        const contentStart = lines[startLine].breakEnd;
-        const contentEnd = lines[endLine].start;
-        blocks.push({ id: blocks.length, startLine, endLine, contentStart, contentEnd });
-        startLine = endLine;
+        const contentStart = lines[lineIndex].contentEnd + lines[lineIndex].lineEnding.length;
+        const contentEnd = lines[closingLineIndex].start;
+        const end = lines[closingLineIndex].contentEnd + lines[closingLineIndex].lineEnding.length;
+        blocks.push({
+            startLineIndex: lineIndex,
+            endLineIndex: closingLineIndex,
+            contentStart,
+            contentEnd,
+            end
+        });
+        lineIndex = closingLineIndex + 1;
     }
-
     return blocks;
 };
 
+const getSelectedLineIndexes = (
+    state: EditorState,
+    lines: readonly DocumentLine[]
+): { startLineIndex: number; endLineIndex: number } => {
+    const range = getSelectedLineRange(state);
+    const startLineIndex = lines.findIndex((line) => line.start === range.lineStarts[0]);
+    return {
+        startLineIndex,
+        endLineIndex: startLineIndex + range.lines.length - 1
+    };
+};
+
+const getContainingFencedBlock = (blocks: readonly FencedBlock[], lineIndex: number): FencedBlock | null =>
+    blocks.find((block) => block.startLineIndex <= lineIndex && block.endLineIndex >= lineIndex) ?? null;
+
 const getIndentationLength = (line: string): number => line.match(/^[ \t]*/)?.[0].length ?? 0;
 
-const parseBlockMarker = (line: string): ParsedBlockMarker | null => {
-    const startOffset = getIndentationLength(line);
-    const body = line.slice(startOffset);
-    if (THEMATIC_BREAK_PATTERN.test(body)) {
+const getOutermostMarker = (line: string): OuterMarker | null => {
+    const indentationLength = getIndentationLength(line);
+    const content = line.slice(indentationLength);
+    if (THEMATIC_BREAK_PATTERN.test(content)) {
         return null;
     }
 
-    const heading = body.match(/^(#{1,6})(?:[ \t]|$)/);
-    if (heading) {
+    const markerPatterns: readonly [OuterMarker["style"], RegExp][] = [
+        ["heading1", HEADING_PATTERN],
+        ["blockquote", BLOCKQUOTE_PATTERN],
+        ["taskList", TASK_LIST_PATTERN],
+        ["bulletList", BULLET_LIST_PATTERN],
+        ["numberedList", NUMBERED_LIST_PATTERN]
+    ];
+    for (const [style, pattern] of markerPatterns) {
+        const match = content.match(pattern);
+        if (!match) {
+            continue;
+        }
+        const resolvedStyle = style === "heading1" ? (`heading${match[1].length}` as OuterMarker["style"]) : style;
         return {
-            style: `heading${heading[1].length}` as Exclude<LineBlockStyle, "text">,
-            startOffset,
-            endOffset: startOffset + heading[0].length
+            style: resolvedStyle,
+            start: indentationLength,
+            end: indentationLength + match[0].length
         };
     }
-
-    const blockquote = body.match(/^>(?:[ \t])?/);
-    if (blockquote) {
-        return { style: "blockquote", startOffset, endOffset: startOffset + blockquote[0].length };
-    }
-
-    const taskList = body.match(/^[-+*][ \t]+\[[ xX]\](?:[ \t]|$)/);
-    if (taskList) {
-        return { style: "taskList", startOffset, endOffset: startOffset + taskList[0].length };
-    }
-
-    const bulletList = body.match(/^[-+*](?:[ \t]|$)/);
-    if (bulletList) {
-        return { style: "bulletList", startOffset, endOffset: startOffset + bulletList[0].length };
-    }
-
-    const numberedList = body.match(/^\d+[.)](?:[ \t]|$)/);
-    if (numberedList) {
-        return { style: "numberedList", startOffset, endOffset: startOffset + numberedList[0].length };
-    }
-
     return null;
 };
 
-const getLineStyle = (line: string): LineBlockStyle => parseBlockMarker(line)?.style ?? "text";
+const getLineBlockStyle = (line: string): ConcreteBlockStyle => getOutermostMarker(line)?.style ?? "text";
 
-const getLineIndexes = (state: EditorState, lines: readonly DocumentLine[]): readonly number[] => {
-    const indexesByStart = new Map(lines.map((line, index) => [line.start, index]));
-    return getSelectedLineRange(state).lineStarts.flatMap((start) => {
-        const index = indexesByStart.get(start);
-        return index === undefined ? [] : [index];
-    });
-};
-
-const createFenceIdsByLine = (blocks: readonly FencedCodeBlock[]): ReadonlyMap<number, number> => {
-    const idsByLine = new Map<number, number>();
-    for (const block of blocks) {
-        for (let lineIndex = block.startLine; lineIndex <= block.endLine; lineIndex += 1) {
-            idsByLine.set(lineIndex, block.id);
-        }
+const getSelectedLineBlockStyle = (
+    line: DocumentLine,
+    lineIndex: number,
+    fencedBlocks: readonly FencedBlock[]
+): LineBlockStyle | null => {
+    const fencedBlock = getContainingFencedBlock(fencedBlocks, lineIndex);
+    if (fencedBlock) {
+        return { style: "codeBlock", fencedBlockId: fencedBlock.startLineIndex };
     }
-    return idsByLine;
-};
-
-const getActiveBlockStyleFromParsedDocument = (
-    state: EditorState,
-    lines: readonly DocumentLine[],
-    blocks: readonly FencedCodeBlock[]
-): ActiveBlockStyle => {
-    const fenceIdsByLine = createFenceIdsByLine(blocks);
-    let activeStyle: ConcreteBlockStyle | undefined;
-    let activeFenceId: number | undefined;
-
-    for (const lineIndex of getLineIndexes(state, lines)) {
-        const fenceId = fenceIdsByLine.get(lineIndex);
-        const content = lines[lineIndex].text;
-        if (fenceId === undefined && /^[ \t]*$/.test(content)) {
-            continue;
-        }
-
-        const style = fenceId === undefined ? getLineStyle(content) : "codeBlock";
-        if (activeStyle !== undefined && (activeStyle !== style || activeFenceId !== fenceId)) {
-            return "mixed";
-        }
-
-        activeStyle = style;
-        activeFenceId = fenceId;
+    if (line.content.trim() === "") {
+        return null;
     }
-
-    return activeStyle ?? "text";
+    return { style: getLineBlockStyle(line.content), fencedBlockId: null };
 };
 
 export const getActiveBlockStyle = (state: EditorState): ActiveBlockStyle => {
-    const lines = parseDocumentLines(state.value);
-    return getActiveBlockStyleFromParsedDocument(state, lines, findFencedCodeBlocks(lines));
+    const lines = getDocumentLines(state.value);
+    const { startLineIndex, endLineIndex } = getSelectedLineIndexes(state, lines);
+    const fencedBlocks = findFencedBlocks(lines);
+    let activeLineStyle: LineBlockStyle | null = null;
+
+    for (let lineIndex = startLineIndex; lineIndex <= endLineIndex; lineIndex += 1) {
+        const lineStyle = getSelectedLineBlockStyle(lines[lineIndex], lineIndex, fencedBlocks);
+        if (!lineStyle) {
+            continue;
+        }
+        if (
+            activeLineStyle &&
+            (activeLineStyle.style !== lineStyle.style || activeLineStyle.fencedBlockId !== lineStyle.fencedBlockId)
+        ) {
+            return "mixed";
+        }
+        activeLineStyle = lineStyle;
+    }
+    return activeLineStyle?.style ?? "text";
 };
 
-const getBlockPrefix = (style: Exclude<ConcreteBlockStyle, "text" | "codeBlock">, bulletStyle: BulletStyle): string => {
+const getStylePrefix = (style: Exclude<ConcreteBlockStyle, "text" | "codeBlock">, bulletStyle: BulletStyle): string => {
     if (style.startsWith("heading")) {
         return `${"#".repeat(Number(style.slice("heading".length)))} `;
     }
-    if (style === "blockquote") {
-        return "> ";
-    }
-    if (style === "bulletList") {
-        return `${bulletStyle} `;
-    }
-    if (style === "numberedList") {
-        return "1. ";
-    }
-    return `${bulletStyle} [ ] `;
+    const prefixes: Readonly<Record<Exclude<ConcreteBlockStyle, "text" | "codeBlock" | `heading${number}`>, string>> = {
+        blockquote: "> ",
+        bulletList: `${bulletStyle} `,
+        numberedList: "1. ",
+        taskList: `${bulletStyle} [ ] `
+    };
+    return prefixes[style as keyof typeof prefixes];
 };
 
-const createLineStyleChange = (
+const createLineStyleEdit = (
     line: DocumentLine,
-    targetStyle: Exclude<ConcreteBlockStyle, "codeBlock">,
+    style: Exclude<ConcreteBlockStyle, "codeBlock">,
     bulletStyle: BulletStyle,
-    shouldStyleCollapsedBlankLine: boolean
-): TextChange | null => {
-    const isBlank = /^[ \t]*$/.test(line.text);
-    if (isBlank) {
-        if (!shouldStyleCollapsedBlankLine || targetStyle === "text") {
-            return null;
-        }
-
-        const prefix = getBlockPrefix(targetStyle, bulletStyle);
-        const text = `${line.text}${prefix}`;
-        return {
-            start: line.start,
-            end: line.contentEnd,
-            text,
-            mapPosition: () => text.length
-        };
-    }
-
-    const marker = parseBlockMarker(line.text);
-    if (targetStyle === "text") {
-        if (!marker) {
-            return null;
-        }
-        const start = line.start + marker.startOffset;
-        const end = line.start + marker.endOffset;
-        return { start, end, text: "", mapPosition: () => 0 };
-    }
-
-    if (marker?.style === targetStyle) {
+    isCollapsedEmptyLine: boolean
+): TextEdit | null => {
+    const isBlankLine = line.content.trim() === "";
+    if (isBlankLine && !isCollapsedEmptyLine) {
         return null;
     }
 
-    const text = getBlockPrefix(targetStyle, bulletStyle);
-    const markerStart = marker?.startOffset ?? getIndentationLength(line.text);
-    const markerEnd = marker?.endOffset ?? markerStart;
-    const start = line.start + markerStart;
-    const end = line.start + markerEnd;
-    return { start, end, text, mapPosition: () => text.length };
+    const marker = getOutermostMarker(line.content);
+    if (style === "text") {
+        return marker ? { start: line.start + marker.start, end: line.start + marker.end, text: "" } : null;
+    }
+    if (marker?.style === style) {
+        return null;
+    }
+
+    const markerStart = marker?.start ?? getIndentationLength(line.content);
+    const markerEnd = marker?.end ?? markerStart;
+    return {
+        start: line.start + markerStart,
+        end: line.start + markerEnd,
+        text: getStylePrefix(style, bulletStyle),
+        insertionAffinity: markerStart === markerEnd ? "after" : undefined
+    };
 };
 
-const mapPositionThroughChanges = (position: number, changes: readonly TextChange[]): number => {
+const getPreferredLineEnding = (value: string, start: number, end: number, followingLineEnding: string): string => {
+    const localLineEnding = value.slice(start, end).match(/\r\n|\n/)?.[0];
+    if (localLineEnding || followingLineEnding) {
+        return localLineEnding ?? followingLineEnding;
+    }
+
+    let precedingLineEnding: string | undefined;
+    for (const match of value.slice(0, start).matchAll(/\r\n|\n/g)) {
+        precedingLineEnding = match[0];
+    }
+    return precedingLineEnding ?? "\n";
+};
+
+const getCodeFence = (content: string): string => {
+    let longestRun = 0;
+    for (const match of content.matchAll(/`+/g)) {
+        longestRun = Math.max(longestRun, match[0].length);
+    }
+    return "`".repeat(Math.max(3, longestRun + 1));
+};
+
+const createCodeWrapEdits = (
+    value: string,
+    lines: readonly DocumentLine[],
+    startLineIndex: number,
+    endLineIndex: number
+): readonly TextEdit[] => {
+    const start = lines[startLineIndex].start;
+    const end = lines[endLineIndex].contentEnd;
+    const content = value.slice(start, end);
+    const lineEnding = getPreferredLineEnding(value, start, end, lines[startLineIndex].lineEnding);
+    const fence = getCodeFence(content);
+    return [
+        { start, end: start, text: `${fence}${lineEnding}`, insertionAffinity: "after" },
+        { start: end, end, text: `${lineEnding}${fence}`, insertionAffinity: "before" }
+    ];
+};
+
+const getCollapsedEmptyFenceMarkerPosition = (
+    state: EditorState,
+    lines: readonly DocumentLine[],
+    block: FencedBlock,
+    style: Exclude<ConcreteBlockStyle, "codeBlock">,
+    selectedLineIndex: number
+): number | null => {
+    if (style === "text" || state.selectionStart !== state.selectionEnd) {
+        return null;
+    }
+    const contentLines = lines.slice(block.startLineIndex + 1, block.endLineIndex);
+    if (contentLines.some((line) => line.content.trim() !== "")) {
+        return null;
+    }
+    const selectedContentLine =
+        selectedLineIndex > block.startLineIndex && selectedLineIndex < block.endLineIndex
+            ? lines[selectedLineIndex]
+            : contentLines[0];
+    return selectedContentLine
+        ? selectedContentLine.start + getIndentationLength(selectedContentLine.content)
+        : block.contentStart;
+};
+
+const createFenceConversionEdits = (
+    lines: readonly DocumentLine[],
+    block: FencedBlock,
+    style: Exclude<ConcreteBlockStyle, "codeBlock">,
+    bulletStyle: BulletStyle,
+    collapsedEmptyMarkerPosition: number | null
+): readonly TextEdit[] => {
+    const edits: TextEdit[] = [
+        {
+            start: lines[block.startLineIndex].start,
+            end: block.contentStart,
+            text: ""
+        },
+        {
+            start: block.contentEnd,
+            end: block.end,
+            text: ""
+        }
+    ];
+    if (style !== "text") {
+        for (let lineIndex = block.startLineIndex + 1; lineIndex < block.endLineIndex; lineIndex += 1) {
+            const line = lines[lineIndex];
+            const markerPosition = line.start + getIndentationLength(line.content);
+            const isCollapsedEmptyLine = collapsedEmptyMarkerPosition === markerPosition;
+            const edit = createLineStyleEdit(line, style, bulletStyle, isCollapsedEmptyLine);
+            if (edit) {
+                edits.push(edit);
+            }
+        }
+        if (block.endLineIndex === block.startLineIndex + 1 && collapsedEmptyMarkerPosition !== null) {
+            edits.push({
+                start: collapsedEmptyMarkerPosition,
+                end: collapsedEmptyMarkerPosition,
+                text: getStylePrefix(style, bulletStyle),
+                insertionAffinity: "after"
+            });
+        }
+    }
+    if (block.endLineIndex === block.startLineIndex + 1 && lines[block.endLineIndex].lineEnding !== "") {
+        edits.push({
+            start: block.contentStart,
+            end: block.contentStart,
+            text: lines[block.endLineIndex].lineEnding,
+            insertionAffinity: "before"
+        });
+    }
+    return edits;
+};
+
+const sortTextEdits = (edits: readonly TextEdit[]): readonly TextEdit[] =>
+    [...edits].sort((left, right) => left.start - right.start || left.end - right.end);
+
+const createEditedText = (
+    value: string,
+    replaceStart: number,
+    replaceEnd: number,
+    edits: readonly TextEdit[]
+): string => {
+    let sourcePosition = replaceStart;
+    let text = "";
+    for (const edit of edits) {
+        if (edit.start < sourcePosition || edit.end > replaceEnd) {
+            throw new Error("Block style edits must be ordered and non-overlapping");
+        }
+        text += value.slice(sourcePosition, edit.start) + edit.text;
+        sourcePosition = edit.end;
+    }
+    return text + value.slice(sourcePosition, replaceEnd);
+};
+
+const mapPositionAfterEdits = (position: number, edits: readonly TextEdit[]): number => {
     let delta = 0;
-    for (const change of changes) {
-        if (position < change.start) {
+    for (const edit of edits) {
+        if (position < edit.start) {
             break;
         }
-        if (position <= (change.mapEnd ?? change.end)) {
-            return change.start + delta + change.mapPosition(position);
+        if (edit.start === edit.end) {
+            if (position === edit.start && edit.insertionAffinity === "before") {
+                continue;
+            }
+            delta += edit.text.length;
+            continue;
         }
-        delta += change.text.length - (change.end - change.start);
+        if (position === edit.start || position < edit.end) {
+            return edit.start + delta + edit.text.length;
+        }
+        delta += edit.text.length - (edit.end - edit.start);
     }
     return position + delta;
 };
 
-const createChangedText = (
-    value: string,
-    replaceStart: number,
-    replaceEnd: number,
-    changes: readonly TextChange[]
-): string => {
-    let cursor = replaceStart;
-    let text = "";
-    for (const change of changes) {
-        text += value.slice(cursor, change.start) + change.text;
-        cursor = change.end;
-    }
-    return text + value.slice(cursor, replaceEnd);
-};
-
-const createEditOperation = (state: EditorState, changes: readonly TextChange[]): EditOperation | null => {
-    if (changes.length === 0) {
+const createEditOperation = (
+    state: EditorState,
+    edits: readonly TextEdit[],
+    forcedReplaceStart?: number,
+    forcedReplaceEnd?: number,
+    selectionStartSourcePosition: number = state.selectionStart,
+    selectionEndSourcePosition: number = state.selectionEnd
+): EditOperation | null => {
+    if (edits.length === 0) {
         return null;
     }
-
-    const replaceStart = changes[0].start;
-    const replaceEnd = changes.at(-1)?.end ?? replaceStart;
-    const text = createChangedText(state.value, replaceStart, replaceEnd, changes);
-    const resultLength = state.value.length - (replaceEnd - replaceStart) + text.length;
-    const clampPosition = (position: number): number => Math.min(Math.max(position, 0), resultLength);
-    const mappedSelectionStart = clampPosition(mapPositionThroughChanges(state.selectionStart, changes));
-    const mappedSelectionEnd = clampPosition(mapPositionThroughChanges(state.selectionEnd, changes));
+    const sortedEdits = sortTextEdits(edits);
+    const replaceStart = forcedReplaceStart ?? sortedEdits[0].start;
+    const replaceEnd = forcedReplaceEnd ?? Math.max(...sortedEdits.map((edit) => edit.end));
+    const text = createEditedText(state.value, replaceStart, replaceEnd, sortedEdits);
+    if (text === state.value.slice(replaceStart, replaceEnd)) {
+        return null;
+    }
     return {
         isTextReplacementRequired: true,
         replaceStart,
         replaceEnd,
         text,
-        selectionStart: Math.min(mappedSelectionStart, mappedSelectionEnd),
-        selectionEnd: Math.max(mappedSelectionStart, mappedSelectionEnd),
+        selectionStart: mapPositionAfterEdits(selectionStartSourcePosition, sortedEdits),
+        selectionEnd: mapPositionAfterEdits(selectionEndSourcePosition, sortedEdits),
         selectionDirection: state.selectionDirection
     };
 };
 
-const createFenceStyleChange = (
-    state: EditorState,
-    lines: readonly DocumentLine[],
-    block: FencedCodeBlock,
-    targetStyle: Exclude<ConcreteBlockStyle, "codeBlock">,
-    bulletStyle: BulletStyle,
-    selectedLineIndexes: readonly number[]
-): TextChange => {
-    const contentLines = lines.slice(block.startLine + 1, block.endLine);
-    const isContentBlank = contentLines.every((line) => /^[ \t]*$/.test(line.text));
-    const shouldInsertEmptyFenceMarker =
-        targetStyle !== "text" && isContentBlank && state.selectionStart === state.selectionEnd;
-    const markerLineIndex =
-        selectedLineIndexes.find((lineIndex) => lineIndex > block.startLine && lineIndex < block.endLine) ??
-        block.startLine + 1;
-    const innerChanges: TextChange[] = [];
-
-    if (targetStyle !== "text") {
-        for (const [index, line] of contentLines.entries()) {
-            const change = createLineStyleChange(
-                line,
-                targetStyle,
-                bulletStyle,
-                shouldInsertEmptyFenceMarker && block.startLine + 1 + index === markerLineIndex
-            );
-            if (change) {
-                innerChanges.push(change);
+const expandCodeBlockLineRange = (
+    fencedBlocks: readonly FencedBlock[],
+    startLineIndex: number,
+    endLineIndex: number
+): { startLineIndex: number; endLineIndex: number } => {
+    let expandedStartLineIndex = startLineIndex;
+    let expandedEndLineIndex = endLineIndex;
+    let isExpansionPending = true;
+    while (isExpansionPending) {
+        isExpansionPending = false;
+        for (const block of fencedBlocks) {
+            if (block.startLineIndex > expandedEndLineIndex || block.endLineIndex < expandedStartLineIndex) {
+                continue;
+            }
+            const nextStartLineIndex = Math.min(expandedStartLineIndex, block.startLineIndex);
+            const nextEndLineIndex = Math.max(expandedEndLineIndex, block.endLineIndex);
+            if (nextStartLineIndex !== expandedStartLineIndex || nextEndLineIndex !== expandedEndLineIndex) {
+                expandedStartLineIndex = nextStartLineIndex;
+                expandedEndLineIndex = nextEndLineIndex;
+                isExpansionPending = true;
             }
         }
     }
-
-    let text = createChangedText(state.value, block.contentStart, block.contentEnd, innerChanges);
-    let blankMarkerCursor: number | null = null;
-    if (shouldInsertEmptyFenceMarker) {
-        if (contentLines.length === 0) {
-            const prefix = getBlockPrefix(targetStyle, bulletStyle);
-            const closerLine = lines[block.endLine];
-            const followingLineEnding = state.value.slice(closerLine.contentEnd, closerLine.breakEnd);
-            text = `${prefix}${followingLineEnding}`;
-            blankMarkerCursor = prefix.length;
-        } else {
-            blankMarkerCursor =
-                mapPositionThroughChanges(lines[markerLineIndex].start, innerChanges) - block.contentStart;
-        }
-    }
-
-    return {
-        start: lines[block.startLine].start,
-        end: lines[block.endLine].breakEnd,
-        text,
-        mapPosition: (position) => {
-            if (blankMarkerCursor !== null && (position < block.contentStart || position >= block.contentEnd)) {
-                return blankMarkerCursor;
-            }
-            if (position < block.contentStart) {
-                return 0;
-            }
-            if (position >= block.contentEnd) {
-                return text.length;
-            }
-            return mapPositionThroughChanges(position, innerChanges) - block.contentStart;
-        }
-    };
+    return { startLineIndex: expandedStartLineIndex, endLineIndex: expandedEndLineIndex };
 };
 
-const getExpandedLineRange = (
-    selectedLineIndexes: readonly number[],
-    blocks: readonly FencedCodeBlock[]
-): { readonly startLine: number; readonly endLine: number } => {
-    let startLine = selectedLineIndexes[0] ?? 0;
-    let endLine = selectedLineIndexes.at(-1) ?? startLine;
-    for (const block of blocks) {
-        if (block.startLine <= endLine && block.endLine >= startLine) {
-            startLine = Math.min(startLine, block.startLine);
-            endLine = Math.max(endLine, block.endLine);
-        }
-    }
-    return { startLine, endLine };
-};
-
-const applyLineBlockStyle = (
-    state: EditorState,
-    targetStyle: Exclude<ConcreteBlockStyle, "codeBlock">,
-    bulletStyle: BulletStyle,
-    lines: readonly DocumentLine[],
-    blocks: readonly FencedCodeBlock[],
-    selectedLineIndexes: readonly number[]
-): EditOperation | null => {
-    const range = getExpandedLineRange(selectedLineIndexes, blocks);
-    const blocksByStartLine = new Map(blocks.map((block) => [block.startLine, block]));
-    const fenceIdsByLine = createFenceIdsByLine(blocks);
-    const changes: TextChange[] = [];
-
-    for (let lineIndex = range.startLine; lineIndex <= range.endLine; lineIndex += 1) {
-        const block = blocksByStartLine.get(lineIndex);
-        if (block) {
-            changes.push(createFenceStyleChange(state, lines, block, targetStyle, bulletStyle, selectedLineIndexes));
-            lineIndex = block.endLine;
-            continue;
-        }
-        if (fenceIdsByLine.has(lineIndex)) {
-            continue;
-        }
-
-        const line = lines[lineIndex];
-        const shouldStyleCollapsedBlankLine =
-            state.selectionStart === state.selectionEnd && range.startLine === range.endLine;
-        const change = createLineStyleChange(line, targetStyle, bulletStyle, shouldStyleCollapsedBlankLine);
-        if (change) {
-            changes.push(change);
-        }
-    }
-
-    return createEditOperation(state, changes);
-};
-
-const getMaximumBacktickRun = (text: string): number =>
-    Math.max(0, ...(text.match(/`+/g)?.map((run) => run.length) ?? []));
-
-const getLineEndingAt = (value: string, index: number): "\n" | "\r\n" | null => {
-    if (value.slice(index, index + 2) === "\r\n") {
-        return "\r\n";
-    }
-    return value[index] === "\n" ? "\n" : null;
-};
-
-const getPreferredLineEnding = (state: EditorState, start: number, end: number): "\n" | "\r\n" => {
-    const selectedLineFeed = state.value.indexOf("\n", start);
-    if (selectedLineFeed >= 0 && selectedLineFeed < end) {
-        return state.value[selectedLineFeed - 1] === "\r" ? "\r\n" : "\n";
-    }
-
-    const followingEnding = getLineEndingAt(state.value, end);
-    if (followingEnding) {
-        return followingEnding;
-    }
-
-    const previousLineFeed = state.value.lastIndexOf("\n", start - 1);
-    return previousLineFeed >= 0 && state.value[previousLineFeed - 1] === "\r" ? "\r\n" : "\n";
-};
-
-const isSelectionInSingleFence = (
-    state: EditorState,
-    lines: readonly DocumentLine[],
-    blocks: readonly FencedCodeBlock[],
-    selectedLineIndexes: readonly number[]
-): boolean => {
-    if (getActiveBlockStyleFromParsedDocument(state, lines, blocks) !== "codeBlock") {
-        return false;
-    }
-    const fenceIdsByLine = createFenceIdsByLine(blocks);
-    const fenceIds = new Set(
-        selectedLineIndexes.flatMap((lineIndex) => {
-            const fenceId = fenceIdsByLine.get(lineIndex);
-            return fenceId === undefined ? [] : [fenceId];
-        })
-    );
-    return fenceIds.size === 1;
-};
-
-const applyCodeBlockStyle = (
-    state: EditorState,
-    lines: readonly DocumentLine[],
-    blocks: readonly FencedCodeBlock[],
-    selectedLineIndexes: readonly number[]
-): EditOperation | null => {
-    if (isSelectionInSingleFence(state, lines, blocks, selectedLineIndexes)) {
-        return null;
-    }
-
-    const range = getExpandedLineRange(selectedLineIndexes, blocks);
-    const start = lines[range.startLine].start;
-    const end = lines[range.endLine].contentEnd;
-    const content = state.value.slice(start, end);
-    const fence = "`".repeat(Math.max(3, getMaximumBacktickRun(content) + 1));
-    const lineEnding = getPreferredLineEnding(state, start, end);
-    const openingLength = fence.length + lineEnding.length;
-    const text = `${fence}${lineEnding}${content}${lineEnding}${fence}`;
-    const change: TextChange = {
-        start,
-        end,
-        mapEnd: lines[range.endLine].breakEnd,
-        text,
-        mapPosition: (position) => openingLength + Math.min(Math.max(position - start, 0), content.length)
-    };
-    return createEditOperation(state, [change]);
-};
+const clampPositionToRange = (position: number, start: number, end: number): number =>
+    Math.min(Math.max(position, start), end);
 
 export const applyBlockStyle = (
     state: EditorState,
-    targetStyle: ConcreteBlockStyle,
+    style: ConcreteBlockStyle,
     bulletStyle: BulletStyle = "-"
 ): EditOperation | null => {
-    const lines = parseDocumentLines(state.value);
-    const blocks = findFencedCodeBlocks(lines);
-    const selectedLineIndexes = getLineIndexes(state, lines);
-    const activeStyle = getActiveBlockStyleFromParsedDocument(state, lines, blocks);
-
-    if (targetStyle !== "codeBlock" && activeStyle === targetStyle) {
+    if (getActiveBlockStyle(state) === style) {
         return null;
     }
-    if (targetStyle === "codeBlock") {
-        return applyCodeBlockStyle(state, lines, blocks, selectedLineIndexes);
+
+    const lines = getDocumentLines(state.value);
+    const { startLineIndex, endLineIndex } = getSelectedLineIndexes(state, lines);
+    const fencedBlocks = findFencedBlocks(lines);
+    if (style === "codeBlock") {
+        const expandedRange = expandCodeBlockLineRange(fencedBlocks, startLineIndex, endLineIndex);
+        const wrapStart = lines[expandedRange.startLineIndex].start;
+        const wrapEnd = lines[expandedRange.endLineIndex].contentEnd;
+        const selectionStartSourcePosition = clampPositionToRange(state.selectionStart, wrapStart, wrapEnd);
+        const selectionEndSourcePosition = Math.max(
+            selectionStartSourcePosition,
+            clampPositionToRange(state.selectionEnd, wrapStart, wrapEnd)
+        );
+        return createEditOperation(
+            state,
+            createCodeWrapEdits(state.value, lines, expandedRange.startLineIndex, expandedRange.endLineIndex),
+            wrapStart,
+            wrapEnd,
+            selectionStartSourcePosition,
+            selectionEndSourcePosition
+        );
     }
-    return applyLineBlockStyle(state, targetStyle, bulletStyle, lines, blocks, selectedLineIndexes);
+
+    const edits: TextEdit[] = [];
+    const intersectedBlocks = fencedBlocks.filter(
+        (block) => block.startLineIndex <= endLineIndex && block.endLineIndex >= startLineIndex
+    );
+    let forcedCursorSourcePosition: number | null = null;
+    for (const block of intersectedBlocks) {
+        const markerPosition = getCollapsedEmptyFenceMarkerPosition(state, lines, block, style, startLineIndex);
+        if (markerPosition !== null) {
+            forcedCursorSourcePosition = markerPosition;
+        }
+        edits.push(...createFenceConversionEdits(lines, block, style, bulletStyle, markerPosition));
+    }
+
+    for (let lineIndex = startLineIndex; lineIndex <= endLineIndex; lineIndex += 1) {
+        if (getContainingFencedBlock(intersectedBlocks, lineIndex)) {
+            continue;
+        }
+        const isCollapsedEmptyLine = state.selectionStart === state.selectionEnd && startLineIndex === endLineIndex;
+        const edit = createLineStyleEdit(lines[lineIndex], style, bulletStyle, isCollapsedEmptyLine);
+        if (edit) {
+            edits.push(edit);
+            if (isCollapsedEmptyLine && style !== "text" && lines[lineIndex].content.trim() === "") {
+                forcedCursorSourcePosition = edit.start;
+            }
+        }
+    }
+    const replaceStart = Math.min(
+        lines[startLineIndex].start,
+        ...intersectedBlocks.map((block) => lines[block.startLineIndex].start)
+    );
+    const replaceEnd = Math.max(lines[endLineIndex].contentEnd, ...intersectedBlocks.map((block) => block.end));
+    const operation = createEditOperation(state, edits, replaceStart, replaceEnd);
+    if (!operation || forcedCursorSourcePosition === null) {
+        return operation;
+    }
+    const mappedCursor = mapPositionAfterEdits(forcedCursorSourcePosition, sortTextEdits(edits));
+    return {
+        ...operation,
+        selectionStart: mappedCursor,
+        selectionEnd: mappedCursor
+    };
 };

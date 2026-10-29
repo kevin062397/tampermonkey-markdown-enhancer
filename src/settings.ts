@@ -106,27 +106,31 @@ const normalizeShortcutOverrides = (value: unknown): ShortcutOverrides => {
     }
 
     while (true) {
-        const effectiveShortcuts = new Map<string, ShortcutCommandId[]>();
+        const shortcutIdsByKey = new Map<string, ShortcutCommandId[]>();
         for (const commandId of SHORTCUT_COMMAND_IDS) {
             const shortcut = overrides[commandId] ?? DEFAULT_SHORTCUTS[commandId];
-            const groupKey = getShortcutGroupKey(shortcut);
-            effectiveShortcuts.set(groupKey, [...(effectiveShortcuts.get(groupKey) ?? []), commandId]);
+            const shortcutKey = getShortcutGroupKey(shortcut);
+            const shortcutIds = shortcutIdsByKey.get(shortcutKey) ?? [];
+            shortcutIds.push(commandId);
+            shortcutIdsByKey.set(shortcutKey, shortcutIds);
         }
 
-        const duplicateGroups = [...effectiveShortcuts.values()].filter((commandIds) => commandIds.length > 1);
-        if (duplicateGroups.length === 0) {
+        const conflictingOverrideIds = new Set<ShortcutCommandId>();
+        for (const shortcutIds of shortcutIdsByKey.values()) {
+            if (shortcutIds.length > 1) {
+                for (const commandId of shortcutIds) {
+                    if (overrides[commandId] !== undefined) {
+                        conflictingOverrideIds.add(commandId);
+                    }
+                }
+            }
+        }
+        if (conflictingOverrideIds.size === 0) {
             break;
         }
-
-        for (const commandIds of duplicateGroups) {
-            const defaultOwner = commandIds.find((commandId) =>
-                areShortcutsEqual(overrides[commandId] ?? DEFAULT_SHORTCUTS[commandId], DEFAULT_SHORTCUTS[commandId])
-            );
-            const retainedCommandId = defaultOwner ?? commandIds[0];
-            for (const commandId of commandIds) {
-                if (commandId !== retainedCommandId) {
-                    delete overrides[commandId];
-                }
+        for (const commandId of SHORTCUT_COMMAND_IDS) {
+            if (conflictingOverrideIds.has(commandId)) {
+                delete overrides[commandId];
             }
         }
     }
