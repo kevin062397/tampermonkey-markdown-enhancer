@@ -40,6 +40,14 @@ describe("Userscript", () => {
         expect(registerMenuCommand).toHaveBeenNthCalledWith(2, "Refreshed", callback, { id: 41 });
     });
 
+    test("reports settings status through the browser alert boundary", () => {
+        const alert = vi.spyOn(window, "alert").mockImplementation(() => undefined);
+        const environment = createDefaultUserscriptEnvironment();
+
+        environment.reportStatus("Settings updated.");
+
+        expect(alert).toHaveBeenCalledWith("Settings updated.");
+    });
     test("composes storage, static menus, live targeting, and runtime", () => {
         let storedValue: unknown;
         const commands = new Map<number, { readonly label: string; readonly callback: () => void }>();
@@ -65,6 +73,7 @@ describe("Userscript", () => {
                 return commandId;
             }),
             requestInput: vi.fn(() => inputs.shift() ?? null),
+            reportStatus: vi.fn(),
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => new URL("https://example.test/editor"),
             isTopFrame: true
@@ -73,7 +82,7 @@ describe("Userscript", () => {
         const textArea = document.createElement("textarea");
         document.body.append(textArea);
 
-        expect(commands).toHaveLength(8);
+        expect(commands).toHaveLength(9);
         expect(writeValue).toHaveBeenCalledWith(SETTINGS_STORAGE_KEY, createDefaultSettings());
 
         textArea.value = "a";
@@ -81,6 +90,13 @@ describe("Userscript", () => {
         executeCommand("Set Tab Width");
         expect(dispatchKey(textArea, "Tab").defaultPrevented).toBe(true);
         expect(textArea.value).toBe("a ");
+
+        textArea.value = "SENSITIVE_DRAFT_CONTENT";
+        inputs.push("0");
+        executeCommand("Set Tab Width");
+        expect(vi.mocked(environment.reportStatus).mock.calls.flat().join(" ")).not.toContain(
+            "SENSITIVE_DRAFT_CONTENT"
+        );
 
         executeCommand("Disable Markdown Editing");
         textArea.value = "value";
@@ -120,6 +136,7 @@ describe("Userscript", () => {
             requestInput: vi.fn(() => {
                 throw new Error("input unavailable");
             }),
+            reportStatus: vi.fn(),
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => {
                 if (isFailureEnabled) {
@@ -133,7 +150,7 @@ describe("Userscript", () => {
         const callbacks = [...commands.values()];
         isFailureEnabled = true;
 
-        expect(callbacks).toHaveLength(8);
+        expect(callbacks).toHaveLength(9);
         for (const callback of callbacks) {
             expect(callback).not.toThrow();
         }
@@ -166,6 +183,7 @@ describe("Userscript", () => {
                 return commandId;
             }),
             requestInput: vi.fn(() => null),
+            reportStatus: vi.fn(),
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => new URL("https://example.test/editor"),
             isTopFrame: true
@@ -184,9 +202,10 @@ describe("Userscript", () => {
             "Enable Markdown Editing",
             "Enable Formatting Toolbar"
         ]);
-        expect(registrations.slice(8)).toEqual([
+        expect(registrations.slice(9)).toEqual([
             { id: 1, existingCommandId: 1 },
-            { id: 2, existingCommandId: 2 }
+            { id: 2, existingCommandId: 2 },
+            { id: 8, existingCommandId: 8 }
         ]);
         expect(focusListener).toBeTypeOf("function");
 
@@ -196,21 +215,18 @@ describe("Userscript", () => {
     });
 
     test("removes the focus listener when runtime initialization fails", () => {
-        let readCount = 0;
         let nextCommandId = 1;
         const addEventListener = vi.spyOn(window, "addEventListener");
         const removeEventListener = vi.spyOn(window, "removeEventListener");
+        vi.spyOn(document, "addEventListener").mockImplementationOnce(() => {
+            throw new Error("runtime initialization unavailable");
+        });
         const environment: UserscriptEnvironment = {
-            readValue: vi.fn(() => {
-                readCount += 1;
-                if (readCount === 3) {
-                    throw new Error("runtime initialization unavailable");
-                }
-                return createDefaultSettings();
-            }),
+            readValue: vi.fn(() => createDefaultSettings()),
             writeValue: vi.fn(),
             registerCommand: vi.fn((_label, _callback, existingCommandId) => existingCommandId ?? nextCommandId++),
             requestInput: vi.fn(() => null),
+            reportStatus: vi.fn(),
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => new URL("https://example.test/editor"),
             isTopFrame: true
@@ -235,6 +251,7 @@ describe("Userscript", () => {
                 throw new Error("menu registration unavailable");
             }),
             requestInput: vi.fn(() => null),
+            reportStatus: vi.fn(),
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => new URL("https://example.test/editor"),
             isTopFrame: true
@@ -261,6 +278,7 @@ describe("Userscript", () => {
             writeValue: vi.fn(),
             registerCommand: vi.fn((_label, _callback, existingCommandId) => existingCommandId ?? nextCommandId++),
             requestInput: vi.fn(() => null),
+            reportStatus: vi.fn(),
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => new URL("https://example.test/editor"),
             isTopFrame: true
@@ -293,6 +311,7 @@ describe("Userscript", () => {
             writeValue: vi.fn(),
             registerCommand: vi.fn((_label, _callback, existingCommandId) => existingCommandId ?? 1),
             requestInput: vi.fn(() => null),
+            reportStatus: vi.fn(),
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => new URL("https://example.test/editor"),
             isTopFrame: true
@@ -318,6 +337,7 @@ describe("Userscript", () => {
     test("applies fresh shared settings inside a child context without menus or focus refresh", async () => {
         const addEventListener = vi.spyOn(window, "addEventListener");
         const registerCommand = vi.fn();
+        const reportStatus = vi.fn();
         let storedSettings = createDefaultSettings();
         const environment: UserscriptEnvironment = {
             readValue: vi.fn(() => storedSettings),
@@ -326,6 +346,7 @@ describe("Userscript", () => {
             }),
             registerCommand,
             requestInput: vi.fn(() => null),
+            reportStatus,
             getPrimaryModifierLabel: () => "Command",
             getPageUrl: () => new URL("https://example.test/embedded-editor"),
             isTopFrame: false
@@ -337,6 +358,7 @@ describe("Userscript", () => {
         textArea.setSelectionRange(0, 5);
 
         expect(registerCommand).not.toHaveBeenCalled();
+        expect(reportStatus).not.toHaveBeenCalled();
         expect(addEventListener.mock.calls.filter(([eventType]) => String(eventType) === "focus")).toHaveLength(0);
         expect(dispatchKey(textArea, "(").defaultPrevented).toBe(true);
         expect(textArea.value).toBe("(value)");
@@ -362,5 +384,69 @@ describe("Userscript", () => {
         await vi.waitFor(() =>
             expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull()
         );
+    });
+
+    test("keeps default editor behavior and reports a persistent startup storage failure", () => {
+        const commands = new Map<string, () => void>();
+        const reportStatus = vi.fn();
+        const environment: UserscriptEnvironment = {
+            readValue: vi.fn(() => {
+                throw new Error("storage read failed");
+            }),
+            writeValue: vi.fn(),
+            registerCommand: vi.fn((label, callback) => {
+                commands.set(label, callback);
+                return commands.size;
+            }),
+            requestInput: vi.fn(() => null),
+            reportStatus,
+            getPrimaryModifierLabel: () => "Command",
+            getPageUrl: () => new URL("https://example.test/editor"),
+            isTopFrame: true
+        };
+        const textArea = document.createElement("textarea");
+        document.body.append(textArea);
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+
+        disposeUserscript = initializeUserscript(environment);
+
+        expect(commands.size).toBe(9);
+        expect(dispatchKey(textArea, "(").defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("(value)");
+        commands.get("Set Tab Width")?.();
+        expect(reportStatus).toHaveBeenCalledWith("Settings are unavailable. Try again after reloading the page.");
+    });
+
+    test("keeps default editor behavior and reports a startup storage write failure", () => {
+        const commands = new Map<string, () => void>();
+        const reportStatus = vi.fn();
+        const environment: UserscriptEnvironment = {
+            readValue: vi.fn(() => undefined),
+            writeValue: vi.fn(() => {
+                throw new Error("storage write failed");
+            }),
+            registerCommand: vi.fn((label, callback) => {
+                commands.set(label, callback);
+                return commands.size;
+            }),
+            requestInput: vi.fn(() => "8"),
+            reportStatus,
+            getPrimaryModifierLabel: () => "Command",
+            getPageUrl: () => new URL("https://example.test/editor"),
+            isTopFrame: true
+        };
+        const textArea = document.createElement("textarea");
+        document.body.append(textArea);
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+
+        disposeUserscript = initializeUserscript(environment);
+
+        expect(commands.size).toBe(9);
+        expect(dispatchKey(textArea, "(").defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("(value)");
+        commands.get("Set Tab Width")?.();
+        expect(reportStatus).toHaveBeenCalledWith("Settings could not be saved. Try again after reloading the page.");
     });
 });

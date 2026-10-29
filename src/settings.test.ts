@@ -226,6 +226,7 @@ describe("Settings", () => {
         const store = createSettingsStore(storage);
         const createChanges = vi.fn(() => ({ tabWidth: 8 }));
 
+        expect(store.canUpdateSettings()).toBe(false);
         expect(store.updateSettings(createChanges)).toEqual(createDefaultSettings());
         expect(createChanges).not.toHaveBeenCalled();
         expect(storage.getStoredValue()).toBe(futurePayload);
@@ -246,7 +247,7 @@ describe("Settings", () => {
 
         expect(secondStore.getSettings()).toMatchObject({ tabWidth: 2, isEnabled: false });
         expect(storage.getStoredValue()).toMatchObject({ tabWidth: 2, isEnabled: false });
-        expect(storage.readValue).toHaveBeenCalledTimes(6);
+        expect(storage.readValue).toHaveBeenCalledTimes(8);
         expect(storage.writeValue).toHaveBeenCalledTimes(2);
     });
 
@@ -426,5 +427,146 @@ describe("Settings", () => {
                 excludedHostnames: ["BÜCHER.example.", "xn--bcher-kva.EXAMPLE", "127.1", "127.0.0.1", "not a host"]
             }).excludedHostnames
         ).toEqual(["xn--bcher-kva.example", "127.0.0.1"]);
+    });
+
+    test("keeps default settings available when the initial storage read fails", () => {
+        const storage = {
+            readValue: vi.fn(() => {
+                throw new Error("storage read failed");
+            }),
+            writeValue: vi.fn()
+        };
+
+        const store = createSettingsStore(storage);
+
+        expect(store.getSettings()).toEqual(createDefaultSettings());
+        expect(store.canUpdateSettings).toThrow("storage read failed");
+        expect(storage.writeValue).not.toHaveBeenCalled();
+    });
+
+    test("keeps default settings available when the initial repair write fails", () => {
+        const storage = {
+            readValue: vi.fn(() => undefined),
+            writeValue: vi.fn(() => {
+                throw new Error("storage write failed");
+            })
+        };
+
+        const store = createSettingsStore(storage);
+
+        expect(store.getSettings()).toEqual(createDefaultSettings());
+        expect(() => store.updateSettings({ tabWidth: 8 })).toThrow("storage write failed");
+        expect(store.getSettings()).toEqual(createDefaultSettings());
+    });
+
+    test("contains subscriber failures after saving and continues notification", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+        const receiveSettings = vi.fn();
+        store.subscribeSettings(() => {
+            throw new Error("subscriber failed");
+        });
+        store.subscribeSettings(receiveSettings);
+
+        expect(() => store.updateSettings({ tabWidth: 8 })).not.toThrow();
+
+        expect(storage.getStoredValue()).toMatchObject({ tabWidth: 8 });
+        expect(store.getSettings().tabWidth).toBe(8);
+        expect(receiveSettings).toHaveBeenCalledWith(expect.objectContaining({ tabWidth: 8 }));
+    });
+
+    test("merges a same-schema storage change made during updater evaluation", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+
+        store.updateSettings((settings) => {
+            storage.setStoredValue({ ...settings, tabWidth: 8 });
+            return { isEnabled: false };
+        });
+
+        expect(storage.getStoredValue()).toEqual({ ...createDefaultSettings(), isEnabled: false, tabWidth: 8 });
+    });
+
+    test("preserves a future schema introduced during updater evaluation", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+        const futureSettings = { version: 2, futureValue: "preserve" };
+        storage.writeValue.mockClear();
+
+        store.updateSettings(() => {
+            storage.setStoredValue(futureSettings);
+            return { tabWidth: 8 };
+        });
+
+        expect(storage.getStoredValue()).toBe(futureSettings);
+        expect(storage.writeValue).not.toHaveBeenCalled();
+        expect(store.canUpdateSettings()).toBe(false);
+    });
+
+    test("recomputes a shortcut collection update after storage changes during evaluation", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+        let evaluationCount = 0;
+
+        store.updateSettings((settings) => {
+            evaluationCount += 1;
+            if (evaluationCount === 1) {
+                storage.setStoredValue({
+                    ...settings,
+                    shortcutOverrides: { italic: { key: "x", isPrimaryModifierRequired: true } }
+                });
+            }
+            return {
+                shortcutOverrides: {
+                    ...settings.shortcutOverrides,
+                    bold: { key: "7", isPrimaryModifierRequired: true }
+                }
+            };
+        });
+
+        expect(evaluationCount).toBe(2);
+        expect(storage.getStoredValue()).toMatchObject({
+            shortcutOverrides: {
+                bold: { key: "7", isPrimaryModifierRequired: true },
+                italic: { key: "x", isPrimaryModifierRequired: true }
+            }
+        });
+    });
+
+    test("preserves a future schema introduced during updater reevaluation", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+        const futureSettings = { version: 2, futureValue: "preserve" };
+        let evaluationCount = 0;
+        storage.writeValue.mockClear();
+
+        const result = store.updateSettingsWithOutcome?.((settings) => {
+            evaluationCount += 1;
+            storage.setStoredValue(evaluationCount === 1 ? { ...settings, tabWidth: 8 } : futureSettings);
+            return { isEnabled: false };
+        });
+
+        expect(evaluationCount).toBe(2);
+        expect(result?.outcome).toBe("read-only");
+        expect(storage.getStoredValue()).toBe(futureSettings);
+        expect(storage.writeValue).not.toHaveBeenCalled();
+    });
+
+    test("returns a conflict without writing when storage never stabilizes", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+        let evaluationCount = 0;
+        storage.writeValue.mockClear();
+
+        const result = store.updateSettingsWithOutcome?.((settings) => {
+            evaluationCount += 1;
+            storage.setStoredValue({ ...settings, tabWidth: settings.tabWidth === 8 ? 4 : 8 });
+            return { isEnabled: false };
+        });
+
+        expect(evaluationCount).toBe(3);
+        expect(result?.outcome).toBe("conflict");
+        expect(storage.getStoredValue()).toMatchObject({ isEnabled: true });
+        expect(storage.writeValue).not.toHaveBeenCalled();
     });
 });

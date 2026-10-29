@@ -9,6 +9,7 @@ export interface UserscriptEnvironment {
     readonly writeValue: (key: string, value: MarkdownEnhancerSettings) => void;
     readonly registerCommand: (label: string, callback: () => void, existingCommandId?: number) => unknown;
     readonly requestInput: (prompt: string, currentValue: string) => string | null;
+    readonly reportStatus: (message: string) => void;
     readonly getPrimaryModifierLabel: () => PrimaryModifierLabel;
     readonly getPageUrl: () => URL;
     readonly isTopFrame: boolean;
@@ -22,6 +23,7 @@ export const createDefaultUserscriptEnvironment = (): UserscriptEnvironment => (
             ? GM_registerMenuCommand(label, callback)
             : GM_registerMenuCommand(label, callback, { id: existingCommandId }),
     requestInput: (prompt, currentValue) => window.prompt(prompt, currentValue),
+    reportStatus: (message) => window.alert(message),
     getPrimaryModifierLabel,
     getPageUrl: () => new URL(window.location.href),
     isTopFrame: window.top === window

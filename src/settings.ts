@@ -41,9 +41,17 @@ export interface SettingsSource {
 export type SettingsUpdate =
     Partial<MarkdownEnhancerSettings> | ((settings: MarkdownEnhancerSettings) => Partial<MarkdownEnhancerSettings>);
 
+export type SettingsUpdateOutcome = "applied" | "read-only" | "conflict";
+export interface SettingsUpdateResult {
+    readonly settings: MarkdownEnhancerSettings;
+    readonly outcome: SettingsUpdateOutcome;
+}
+
 export interface SettingsStore extends SettingsSource {
+    readonly canUpdateSettings: () => boolean;
     readonly subscribeSettings: (listener: (settings: MarkdownEnhancerSettings) => void) => () => void;
     readonly updateSettings: (update: SettingsUpdate) => MarkdownEnhancerSettings;
+    readonly updateSettingsWithOutcome?: (update: SettingsUpdate) => SettingsUpdateResult;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -298,15 +306,26 @@ const hasUnsupportedStoredSchemaVersion = (value: unknown): boolean =>
     Number.isInteger(value.version) &&
     value.version > createDefaultSettings().version;
 
+const MAX_SETTINGS_UPDATE_ATTEMPTS = 3;
+
 export const createSettingsStore = (storage: SettingsStorage): SettingsStore => {
-    const rawSettings = storage.readValue(SETTINGS_STORAGE_KEY);
+    let rawSettings: unknown = createDefaultSettings();
+    try {
+        rawSettings = storage.readValue(SETTINGS_STORAGE_KEY);
+    } catch {
+        // Keep default in-memory settings available while storage is unavailable.
+    }
     const listeners = new Set<(settings: MarkdownEnhancerSettings) => void>();
     let latestRawValue = rawSettings;
     let currentSettings = normalizeSettings(rawSettings);
     let isNotifyingSettings = false;
     let hasPendingSettingsNotification = false;
     if (!hasUnsupportedStoredSchemaVersion(rawSettings) && !areValuesEqual(rawSettings, currentSettings)) {
-        storage.writeValue(SETTINGS_STORAGE_KEY, currentSettings);
+        try {
+            storage.writeValue(SETTINGS_STORAGE_KEY, currentSettings);
+        } catch {
+            // A later user action reports unavailable storage through canUpdateSettings or updateSettings.
+        }
     }
 
     const notifySettings = (): void => {
@@ -321,7 +340,11 @@ export const createSettingsStore = (storage: SettingsStorage): SettingsStore => 
                 const notifiedSettings = currentSettings;
                 for (const listener of [...listeners]) {
                     if (listeners.has(listener)) {
-                        listener(notifiedSettings);
+                        try {
+                            listener(notifiedSettings);
+                        } catch {
+                            // One optional subscriber must not block later settings consumers or change save outcomes.
+                        }
                     }
                 }
             } while (hasPendingSettingsNotification);
@@ -331,7 +354,7 @@ export const createSettingsStore = (storage: SettingsStorage): SettingsStore => 
         }
     };
 
-    const getLatestSettings = (): MarkdownEnhancerSettings => {
+    const refreshLatestSettings = (): MarkdownEnhancerSettings => {
         latestRawValue = storage.readValue(SETTINGS_STORAGE_KEY);
         const latestSettings = normalizeSettings(latestRawValue);
         if (!areValuesEqual(currentSettings, latestSettings)) {
@@ -341,28 +364,54 @@ export const createSettingsStore = (storage: SettingsStorage): SettingsStore => 
         return currentSettings;
     };
 
+    const getLatestSettings = (): MarkdownEnhancerSettings => {
+        try {
+            return refreshLatestSettings();
+        } catch {
+            return currentSettings;
+        }
+    };
+
+    const updateSettingsWithOutcome = (update: SettingsUpdate): SettingsUpdateResult => {
+        let candidateSettings = refreshLatestSettings();
+        if (hasUnsupportedStoredSchemaVersion(latestRawValue)) {
+            return { settings: candidateSettings, outcome: "read-only" };
+        }
+
+        for (let attempt = 0; attempt < MAX_SETTINGS_UPDATE_ATTEMPTS; attempt += 1) {
+            const changes = typeof update === "function" ? update(candidateSettings) : update;
+            const verifiedSettings = refreshLatestSettings();
+            if (hasUnsupportedStoredSchemaVersion(latestRawValue)) {
+                return { settings: verifiedSettings, outcome: "read-only" };
+            }
+            if (!areValuesEqual(candidateSettings, verifiedSettings)) {
+                candidateSettings = verifiedSettings;
+                continue;
+            }
+
+            const nextSettings = normalizeCurrentSettings({ ...verifiedSettings, ...changes, version: 1 });
+            if (!areValuesEqual(latestRawValue, nextSettings)) {
+                storage.writeValue(SETTINGS_STORAGE_KEY, nextSettings);
+                currentSettings = nextSettings;
+                notifySettings();
+            }
+            return { settings: currentSettings, outcome: "applied" };
+        }
+
+        return { settings: currentSettings, outcome: "conflict" };
+    };
+
     return {
+        canUpdateSettings: () => {
+            refreshLatestSettings();
+            return !hasUnsupportedStoredSchemaVersion(latestRawValue);
+        },
         getSettings: getLatestSettings,
         subscribeSettings: (listener) => {
             listeners.add(listener);
             return () => listeners.delete(listener);
         },
-        updateSettings: (update) => {
-            const latestSettings = getLatestSettings();
-            if (hasUnsupportedStoredSchemaVersion(latestRawValue)) {
-                return latestSettings;
-            }
-
-            const changes = typeof update === "function" ? update(latestSettings) : update;
-            const nextSettings = normalizeCurrentSettings({ ...latestSettings, ...changes, version: 1 });
-            if (areValuesEqual(latestRawValue, nextSettings)) {
-                return currentSettings;
-            }
-
-            currentSettings = nextSettings;
-            storage.writeValue(SETTINGS_STORAGE_KEY, currentSettings);
-            notifySettings();
-            return currentSettings;
-        }
+        updateSettings: (update) => updateSettingsWithOutcome(update).settings,
+        updateSettingsWithOutcome
     };
 };

@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { createDefaultSettings, createSettingsStore, MAX_EDITOR_SELECTOR_COUNT, type SettingsStore } from "./settings";
+import {
+    createDefaultSettings,
+    createSettingsStore,
+    MAX_EDITOR_SELECTOR_COUNT,
+    MAX_EDITOR_SELECTOR_LENGTH,
+    type SettingsStore
+} from "./settings";
 import { registerSettingsMenu, type SettingsMenuEnvironment } from "./settings-menu";
 
 const createFixture = (pageUrl = "https://BÜCHER.Example./editor", initialSettings = createDefaultSettings()) => {
@@ -16,6 +22,7 @@ const createFixture = (pageUrl = "https://BÜCHER.Example./editor", initialSetti
             return commandId;
         }),
         requestInput: vi.fn(() => inputs.shift() ?? null),
+        reportStatus: vi.fn(),
         getPrimaryModifierLabel: () => "Command",
         getPageUrl: () => new URL(pageUrl)
     };
@@ -60,19 +67,21 @@ beforeEach(() => {
 });
 
 describe("Settings menu", () => {
-    test("registers exactly eight uniquely identified working menu actions in order", () => {
+    test("registers exactly nine uniquely identified working menu actions in order", () => {
         expect(fixture.getCommandLabels()).toEqual([
             "Disable Markdown Editing",
             "Disable Formatting Toolbar",
             "Set Tab Width",
+            "Set Bullet Style",
             "Set Bold Shortcut",
             "Set Italic Shortcut",
             "Set Link Shortcut",
-            "Toggle Current Hostname Exclusion",
+            "Exclude This Hostname",
             "Toggle Editor Exclusion Selector"
         ]);
-        expect(new Set(fixture.commands.keys())).toHaveLength(8);
+        expect(new Set(fixture.commands.keys())).toHaveLength(9);
         expect(fixture.registrations.map(({ existingCommandId }) => existingCommandId)).toEqual([
+            undefined,
             undefined,
             undefined,
             undefined,
@@ -111,11 +120,13 @@ describe("Settings menu", () => {
             "Disable Markdown Editing",
             "Disable Formatting Toolbar"
         ]);
-        expect(fixture.registrations.slice(8).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
+        expect(fixture.registrations.slice(9).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
             [1, 1],
             [2, 2],
+            [8, 8],
             [1, 1],
-            [2, 2]
+            [2, 2],
+            [8, 8]
         ]);
     });
 
@@ -167,6 +178,7 @@ describe("Settings menu", () => {
                         return nextCommandId++;
                     },
                     requestInput: () => null,
+                    reportStatus: () => undefined,
                     getPrimaryModifierLabel: () => "Command",
                     getPageUrl: () => new URL("https://example.test/editor")
                 },
@@ -177,26 +189,32 @@ describe("Settings menu", () => {
             "Disable Markdown Editing",
             "Disable Formatting Toolbar",
             "Set Tab Width",
+            "Set Bullet Style",
             "Set Bold Shortcut",
             "Set Italic Shortcut",
             "Set Link Shortcut",
-            "Toggle Current Hostname Exclusion",
+            "Exclude This Hostname",
             "Toggle Editor Exclusion Selector"
         ]);
         expect(registeredLabels).toEqual([
             "Disable Formatting Toolbar",
             "Set Tab Width",
+            "Set Bullet Style",
             "Set Italic Shortcut",
             "Set Link Shortcut",
-            "Toggle Current Hostname Exclusion",
+            "Exclude This Hostname",
             "Toggle Editor Exclusion Selector"
         ]);
         expect(consoleError).not.toHaveBeenCalled();
+        consoleError.mockRestore();
     });
 
-    test("keeps static actions available when the initial state read fails", () => {
+    test("keeps all actions in canonical order when the initial state read fails", () => {
         const registeredLabels: string[] = [];
         const store: SettingsStore = {
+            canUpdateSettings: () => {
+                throw new Error("settings unavailable");
+            },
             getSettings: () => {
                 throw new Error("settings unavailable");
             },
@@ -214,6 +232,7 @@ describe("Settings menu", () => {
                         return registeredLabels.length;
                     },
                     requestInput: () => null,
+                    reportStatus: () => undefined,
                     getPrimaryModifierLabel: () => "Command",
                     getPageUrl: () => new URL("https://example.test/editor")
                 },
@@ -221,11 +240,14 @@ describe("Settings menu", () => {
             )
         ).not.toThrow();
         expect(registeredLabels).toEqual([
+            "Disable Markdown Editing",
+            "Disable Formatting Toolbar",
             "Set Tab Width",
+            "Set Bullet Style",
             "Set Bold Shortcut",
             "Set Italic Shortcut",
             "Set Link Shortcut",
-            "Toggle Current Hostname Exclusion",
+            "Exclude This Hostname",
             "Toggle Editor Exclusion Selector"
         ]);
     });
@@ -244,6 +266,7 @@ describe("Settings menu", () => {
                     return returnedIds.shift();
                 },
                 requestInput: () => null,
+                reportStatus: () => undefined,
                 getPrimaryModifierLabel: () => "Command",
                 getPageUrl: () => new URL("https://example.test/editor")
             },
@@ -257,15 +280,18 @@ describe("Settings menu", () => {
             "Disable Markdown Editing",
             "Disable Formatting Toolbar",
             "Set Tab Width",
+            "Set Bullet Style",
             "Set Bold Shortcut",
             "Set Italic Shortcut",
             "Set Link Shortcut",
-            "Toggle Current Hostname Exclusion",
-            "Toggle Editor Exclusion Selector"
+            "Exclude This Hostname",
+            "Toggle Editor Exclusion Selector",
+            "Exclude This Hostname",
+            "Exclude This Hostname"
         ]);
     });
 
-    test("preserves both prior state action IDs after invalid or failed refreshes", () => {
+    test("preserves all prior dynamic action IDs after invalid or failed refreshes", () => {
         const registerCommand = vi.mocked(fixture.environment.registerCommand);
         registerCommand.mockClear();
         registerCommand
@@ -276,12 +302,14 @@ describe("Settings menu", () => {
 
         fixture.controller.refresh();
 
-        expect(registerCommand.mock.calls.map(([, , existingCommandId]) => existingCommandId)).toEqual([1, 2]);
+        expect(registerCommand.mock.calls.map(([, , existingCommandId]) => existingCommandId)).toEqual([1, 2, 8]);
 
         registerCommand.mockImplementation((_label, _callback, existingCommandId) => existingCommandId);
         fixture.controller.refresh();
 
-        expect(registerCommand.mock.calls.slice(2).map(([, , existingCommandId]) => existingCommandId)).toEqual([1, 2]);
+        expect(registerCommand.mock.calls.slice(3).map(([, , existingCommandId]) => existingCommandId)).toEqual([
+            1, 2, 8
+        ]);
     });
 
     test("contains every registered callback independently", () => {
@@ -302,14 +330,14 @@ describe("Settings menu", () => {
             throw new Error("page URL unavailable");
         });
 
-        expect(callbacks).toHaveLength(8);
+        expect(callbacks).toHaveLength(9);
         for (const callback of callbacks) {
             expect(callback).not.toThrow();
         }
     });
 
-    test("rereads cross-tab settings once and refreshes only the two state action IDs", () => {
-        const staticCommands = [...fixture.commands.entries()].slice(2);
+    test("rereads cross-tab settings once and refreshes all three dynamic action IDs", () => {
+        const staticCommands = [...fixture.commands.entries()].filter(([id]) => id !== 1 && id !== 2 && id !== 8);
         fixture.setStoredSettings({
             ...createDefaultSettings(),
             isEnabled: false,
@@ -325,17 +353,21 @@ describe("Settings menu", () => {
             "Enable Markdown Editing",
             "Enable Formatting Toolbar",
             "Set Tab Width",
+            "Set Bullet Style",
             "Set Bold Shortcut",
             "Set Italic Shortcut",
             "Set Link Shortcut",
-            "Toggle Current Hostname Exclusion",
+            "Exclude This Hostname",
             "Toggle Editor Exclusion Selector"
         ]);
-        expect(fixture.registrations.slice(8).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
+        expect(fixture.registrations.slice(9).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
             [1, 1],
-            [2, 2]
+            [2, 2],
+            [8, 8]
         ]);
-        expect([...fixture.commands.entries()].slice(2)).toEqual(staticCommands);
+        expect([...fixture.commands.entries()].filter(([id]) => id !== 1 && id !== 2 && id !== 8)).toEqual(
+            staticCommands
+        );
     });
 
     test("isolates one state action refresh failure and preserves its prior ID", () => {
@@ -344,19 +376,21 @@ describe("Settings menu", () => {
         });
 
         expect(() => fixture.controller.refresh()).not.toThrow();
-        expect(fixture.registrations.slice(8).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
-            [2, 2]
+        expect(fixture.registrations.slice(9).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
+            [2, 2],
+            [8, 8]
         ]);
 
         fixture.controller.refresh();
-        expect(fixture.registrations.slice(9).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
+        expect(fixture.registrations.slice(11).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
             [1, 1],
-            [2, 2]
+            [2, 2],
+            [8, 8]
         ]);
     });
 
     test("isolates a settings update failure and continues refreshing both action labels", () => {
-        vi.spyOn(fixture.store, "updateSettings").mockImplementationOnce(() => {
+        vi.spyOn(fixture.store, "updateSettingsWithOutcome").mockImplementationOnce(() => {
             throw new Error("storage update unavailable");
         });
 
@@ -365,7 +399,7 @@ describe("Settings menu", () => {
             "Disable Markdown Editing",
             "Disable Formatting Toolbar"
         ]);
-        expect(fixture.registrations.slice(8).map(({ existingCommandId }) => existingCommandId)).toEqual([1, 2]);
+        expect(fixture.registrations.slice(9).map(({ existingCommandId }) => existingCommandId)).toEqual([1, 2, 8]);
 
         fixture.executeCommand("Disable Markdown Editing");
         expect(fixture.store.getSettings().isEnabled).toBe(false);
@@ -377,7 +411,7 @@ describe("Settings menu", () => {
         fixture.executeCommand("Set Italic Shortcut");
         expect(fixture.environment.requestInput).toHaveBeenNthCalledWith(
             1,
-            "Set Bold Shortcut (Use Command+B; Default: Command+B; Leave Blank to Restore Default When Available)",
+            "Bold Shortcut (Use Command+B; Default: Command+B; Leave Blank to Restore Default When Available)",
             "Command+B"
         );
         expect(fixture.store.getSettings().shortcutOverrides).toEqual({
@@ -411,7 +445,7 @@ describe("Settings menu", () => {
         fixture.executeCommand("Set Italic Shortcut");
         expect(fixture.environment.requestInput).toHaveBeenNthCalledWith(
             1,
-            "Set Bold Shortcut (Use Control+B; Default: Control+B; Leave Blank to Restore Default When Available)",
+            "Bold Shortcut (Use Control+B; Default: Control+B; Leave Blank to Restore Default When Available)",
             "Control+B"
         );
         expect(fixture.store.getSettings().shortcutOverrides).toEqual({
@@ -459,9 +493,9 @@ describe("Settings menu", () => {
     });
 
     test("toggles the canonical current hostname exclusion", () => {
-        fixture.executeCommand("Toggle Current Hostname Exclusion");
+        fixture.executeCommand("Exclude This Hostname");
         expect(fixture.store.getSettings().excludedHostnames).toEqual(["xn--bcher-kva.example"]);
-        fixture.executeCommand("Toggle Current Hostname Exclusion");
+        fixture.executeCommand("Include This Hostname");
         expect(fixture.store.getSettings().excludedHostnames).toEqual([]);
     });
 
@@ -531,6 +565,7 @@ describe("Settings menu", () => {
                     return commands.size;
                 },
                 requestInput: () => inputs.shift() ?? null,
+                reportStatus: () => undefined,
                 getPrimaryModifierLabel: () => "Command",
                 getPageUrl: () => new URL("https://current.example/editor")
             },
@@ -545,7 +580,7 @@ describe("Settings menu", () => {
         };
 
         commands.get("Set Bold Shortcut")?.();
-        commands.get("Toggle Current Hostname Exclusion")?.();
+        commands.get("Exclude This Hostname")?.();
         commands.get("Toggle Editor Exclusion Selector")?.();
 
         expect(storedSettings).toMatchObject({
@@ -557,5 +592,563 @@ describe("Settings menu", () => {
             excludedHostnames: ["existing.example", "current.example"],
             excludedEditorSelectors: [".existing-selector", ".new-selector"]
         });
+    });
+
+    test("reports tab-width outcomes and keeps canceled prompts silent", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        fixture.inputs.push("8", "0", null);
+
+        fixture.executeCommand("Set Tab Width");
+        expect(reportStatus).toHaveBeenLastCalledWith("Tab width set to 8.");
+
+        fixture.executeCommand("Set Tab Width");
+        expect(reportStatus).toHaveBeenLastCalledWith("Enter a whole-number tab width from 1 through 16.");
+        reportStatus.mockClear();
+
+        fixture.executeCommand("Set Tab Width");
+        expect(reportStatus).not.toHaveBeenCalled();
+        expect(fixture.store.getSettings().tabWidth).toBe(8);
+    });
+
+    test("sets and restores the bullet style with current and default values in the prompt", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        fixture.inputs.push("+", "");
+
+        fixture.executeCommand("Set Bullet Style");
+        expect(fixture.environment.requestInput).toHaveBeenNthCalledWith(
+            1,
+            "Bullet Style (-, *, or +; Default: -; Leave Blank to Restore Default)",
+            "-"
+        );
+        expect(fixture.store.getSettings().bulletStyle).toBe("+");
+        expect(reportStatus).toHaveBeenLastCalledWith("Bullet style set to +.");
+
+        fixture.executeCommand("Set Bullet Style");
+        expect(fixture.environment.requestInput).toHaveBeenNthCalledWith(
+            2,
+            "Bullet Style (-, *, or +; Default: -; Leave Blank to Restore Default)",
+            "+"
+        );
+        expect(fixture.store.getSettings().bulletStyle).toBe("-");
+        expect(reportStatus).toHaveBeenLastCalledWith("Bullet style restored to -.");
+    });
+
+    test("rejects invalid bullet styles and keeps cancellation silent", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        fixture.inputs.push("x", null);
+
+        fixture.executeCommand("Set Bullet Style");
+        expect(reportStatus).toHaveBeenLastCalledWith("Enter -, *, or + for the bullet style.");
+        reportStatus.mockClear();
+
+        fixture.executeCommand("Set Bullet Style");
+        expect(reportStatus).not.toHaveBeenCalled();
+        expect(fixture.store.getSettings().bulletStyle).toBe("-");
+    });
+
+    test("reports shortcut updates, resets, malformed input, and collisions", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        fixture.inputs.push("Cmd+X", "", "Shift+X", "Cmd+I");
+
+        fixture.executeCommand("Set Bold Shortcut");
+        expect(reportStatus).toHaveBeenLastCalledWith("Bold shortcut set to Command+X.");
+
+        fixture.executeCommand("Set Bold Shortcut");
+        expect(reportStatus).toHaveBeenLastCalledWith("Bold shortcut restored to Command+B.");
+
+        fixture.executeCommand("Set Bold Shortcut");
+        expect(reportStatus).toHaveBeenLastCalledWith(
+            "Enter the Bold shortcut as Command plus one letter or digit, for example Command+B."
+        );
+
+        fixture.executeCommand("Set Bold Shortcut");
+        expect(reportStatus).toHaveBeenLastCalledWith("Command+I is already assigned to Italic.");
+        expect(fixture.store.getSettings().shortcutOverrides).toEqual({});
+    });
+
+    test("flips the hostname action label in place and reports exclusion outcomes", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        const initialEntry = [...fixture.commands.entries()].find(
+            ([, command]) => command.label === "Exclude This Hostname"
+        );
+        expect(initialEntry?.[0]).toBe(8);
+
+        fixture.executeCommand("Exclude This Hostname");
+        expect(reportStatus).toHaveBeenLastCalledWith("xn--bcher-kva.example is now excluded.");
+        expect(fixture.commands.get(8)?.label).toBe("Include This Hostname");
+
+        fixture.executeCommand("Include This Hostname");
+        expect(reportStatus).toHaveBeenLastCalledWith("xn--bcher-kva.example is now included.");
+        expect(fixture.commands.get(8)?.label).toBe("Exclude This Hostname");
+    });
+
+    test("keeps the hostname action available when the page URL cannot be read", () => {
+        fixture = createFixture("not a URL");
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+
+        fixture.executeCommand("Exclude This Hostname");
+
+        expect(reportStatus).toHaveBeenCalledWith("The current hostname is unavailable.");
+        expect(fixture.store.getSettings().excludedHostnames).toEqual([]);
+    });
+
+    test("shows current selectors and reports whether one is added or removed", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        fixture.inputs.push(".private", ".private");
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+        expect(fixture.environment.requestInput).toHaveBeenNthCalledWith(
+            1,
+            "Editor Exclusion Selector\nEnter an existing selector to remove it, or another valid selector to add it.\nCurrent Selectors:\n(none configured)",
+            ""
+        );
+        expect(reportStatus).toHaveBeenLastCalledWith("Editor exclusion selector added: .private");
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+        expect(fixture.environment.requestInput).toHaveBeenNthCalledWith(
+            2,
+            "Editor Exclusion Selector\nEnter an existing selector to remove it, or another valid selector to add it.\nCurrent Selectors:\n.private",
+            ""
+        );
+        expect(reportStatus).toHaveBeenLastCalledWith("Editor exclusion selector removed: .private");
+    });
+
+    test("explains invalid, overlong, multiline, and capacity-limited selectors", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        fixture.inputs.push("[", "x".repeat(MAX_EDITOR_SELECTOR_LENGTH + 1), ".first\n.second");
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+        expect(reportStatus).toHaveBeenLastCalledWith("Enter a valid CSS selector for the editor exclusion.");
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+        expect(reportStatus).toHaveBeenLastCalledWith(
+            `Enter a nonempty selector containing at most ${MAX_EDITOR_SELECTOR_LENGTH} characters.`
+        );
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+        expect(reportStatus).toHaveBeenLastCalledWith("Enter one editor exclusion selector at a time.");
+
+        const selectors = Array.from({ length: MAX_EDITOR_SELECTOR_COUNT }, (_, index) => `.selector-${index}`);
+        fixture.store.updateSettings({ excludedEditorSelectors: selectors });
+        fixture.inputs.push(".extra");
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+        expect(reportStatus).toHaveBeenLastCalledWith(
+            `Remove an existing selector before adding more than ${MAX_EDITOR_SELECTOR_COUNT}.`
+        );
+    });
+
+    test("keeps future-schema settings read-only and explains the stored version", () => {
+        const futureSettings = { ...createDefaultSettings(), version: 2, futureValue: "preserve" };
+        const writeValue = vi.fn();
+        const store = createSettingsStore({ readValue: () => futureSettings, writeValue });
+        const commands = new Map<string, () => void>();
+        const reportStatus = vi.fn();
+        registerSettingsMenu(
+            {
+                registerCommand: (label, callback) => {
+                    commands.set(label, callback);
+                    return commands.size;
+                },
+                requestInput: vi.fn(() => "+"),
+                reportStatus,
+                getPrimaryModifierLabel: () => "Command",
+                getPageUrl: () => new URL("https://example.test/editor")
+            },
+            store
+        );
+
+        commands.get("Set Bullet Style")?.();
+
+        expect(writeValue).not.toHaveBeenCalled();
+        expect(reportStatus).toHaveBeenCalledWith(
+            "Settings are read-only because they were created by a newer Markdown Enhancer version."
+        );
+    });
+
+    test("reports unavailable reads before prompting", () => {
+        const store: SettingsStore = {
+            canUpdateSettings: () => {
+                throw new Error("storage read failed");
+            },
+            getSettings: () => createDefaultSettings(),
+            subscribeSettings: () => () => undefined,
+            updateSettings: () => createDefaultSettings()
+        };
+        const commands = new Map<string, () => void>();
+        const requestInput = vi.fn(() => "8");
+        const reportStatus = vi.fn();
+        registerSettingsMenu(
+            {
+                registerCommand: (label, callback) => {
+                    commands.set(label, callback);
+                    return commands.size;
+                },
+                requestInput,
+                reportStatus,
+                getPrimaryModifierLabel: () => "Command",
+                getPageUrl: () => new URL("https://example.test/editor")
+            },
+            store
+        );
+
+        commands.get("Set Tab Width")?.();
+
+        expect(requestInput).not.toHaveBeenCalled();
+        expect(reportStatus).toHaveBeenCalledWith("Settings are unavailable. Try again after reloading the page.");
+    });
+
+    test("reports unavailable writes without claiming success", () => {
+        const store = createSettingsStore({
+            readValue: () => createDefaultSettings(),
+            writeValue: () => {
+                throw new Error("storage write failed");
+            }
+        });
+        const commands = new Map<string, () => void>();
+        const reportStatus = vi.fn();
+        registerSettingsMenu(
+            {
+                registerCommand: (label, callback) => {
+                    commands.set(label, callback);
+                    return commands.size;
+                },
+                requestInput: () => "8",
+                reportStatus,
+                getPrimaryModifierLabel: () => "Command",
+                getPageUrl: () => new URL("https://example.test/editor")
+            },
+            store
+        );
+
+        commands.get("Set Tab Width")?.();
+
+        expect(reportStatus).toHaveBeenCalledTimes(1);
+        expect(reportStatus).toHaveBeenCalledWith("Settings could not be saved. Try again after reloading the page.");
+        expect(store.getSettings().tabWidth).toBe(4);
+    });
+
+    test("keeps every canceled prompt silent", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        fixture.inputs.push(null, null, null, null);
+
+        fixture.executeCommand("Set Tab Width");
+        fixture.executeCommand("Set Bullet Style");
+        fixture.executeCommand("Set Bold Shortcut");
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+
+        expect(reportStatus).not.toHaveBeenCalled();
+    });
+
+    test("contains unavailable status presentation", () => {
+        vi.mocked(fixture.environment.reportStatus).mockImplementation(() => {
+            throw new Error("dialog unavailable");
+        });
+        fixture.inputs.push("0");
+
+        expect(() => fixture.executeCommand("Set Tab Width")).not.toThrow();
+    });
+
+    test("merges shortcut changes made while the prompt is open", () => {
+        vi.mocked(fixture.environment.requestInput).mockImplementationOnce(() => {
+            fixture.setStoredSettings({
+                ...createDefaultSettings(),
+                shortcutOverrides: { italic: { key: "x", isPrimaryModifierRequired: true } }
+            });
+            return "Cmd+7";
+        });
+
+        fixture.executeCommand("Set Bold Shortcut");
+
+        expect(fixture.store.getSettings().shortcutOverrides).toEqual({
+            bold: { key: "7", isPrimaryModifierRequired: true },
+            italic: { key: "x", isPrimaryModifierRequired: true }
+        });
+    });
+
+    test("reports a shortcut collision introduced while the prompt is open", () => {
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        vi.mocked(fixture.environment.requestInput).mockImplementationOnce(() => {
+            fixture.setStoredSettings({
+                ...createDefaultSettings(),
+                shortcutOverrides: { italic: { key: "x", isPrimaryModifierRequired: true } }
+            });
+            return "Cmd+X";
+        });
+
+        fixture.executeCommand("Set Bold Shortcut");
+
+        expect(fixture.store.getSettings().shortcutOverrides).toEqual({
+            italic: { key: "x", isPrimaryModifierRequired: true }
+        });
+        expect(reportStatus).toHaveBeenCalledWith("Command+X is already assigned to Italic.");
+    });
+
+    test("merges selector changes made while the prompt is open", () => {
+        vi.mocked(fixture.environment.requestInput).mockImplementationOnce(() => {
+            fixture.setStoredSettings({
+                ...createDefaultSettings(),
+                excludedEditorSelectors: [".concurrent"]
+            });
+            return ".submitted";
+        });
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+
+        expect(fixture.store.getSettings().excludedEditorSelectors).toEqual([".concurrent", ".submitted"]);
+        expect(fixture.environment.reportStatus).toHaveBeenCalledWith("Editor exclusion selector added: .submitted");
+    });
+
+    test("does not report success when storage becomes read-only during an update", () => {
+        const defaultSettings = createDefaultSettings();
+        const updateSettingsWithOutcome = vi.fn((update: Parameters<SettingsStore["updateSettings"]>[0]) => {
+            if (typeof update === "function") {
+                update(defaultSettings);
+            }
+            return { settings: defaultSettings, outcome: "read-only" as const };
+        });
+        const store: SettingsStore = {
+            canUpdateSettings: () => true,
+            getSettings: () => defaultSettings,
+            subscribeSettings: () => () => undefined,
+            updateSettings: () => defaultSettings,
+            updateSettingsWithOutcome
+        };
+        const commands = new Map<string, () => void>();
+        const reportStatus = vi.fn();
+        registerSettingsMenu(
+            {
+                registerCommand: (label, callback) => {
+                    commands.set(label, callback);
+                    return commands.size;
+                },
+                requestInput: () => "8",
+                reportStatus,
+                getPrimaryModifierLabel: () => "Command",
+                getPageUrl: () => new URL("https://example.test/editor")
+            },
+            store
+        );
+
+        commands.get("Set Tab Width")?.();
+
+        expect(updateSettingsWithOutcome).toHaveBeenCalledOnce();
+        expect(reportStatus).toHaveBeenCalledTimes(1);
+        expect(reportStatus).toHaveBeenCalledWith(
+            "Settings are read-only because they were created by a newer Markdown Enhancer version."
+        );
+    });
+
+    test("merges hostname changes introduced during invocation", () => {
+        fixture.setStoredSettings({
+            ...createDefaultSettings(),
+            excludedHostnames: ["existing.example"]
+        });
+        const canUpdateSettings = vi.spyOn(fixture.store, "canUpdateSettings");
+        const checkCanUpdateSettings = canUpdateSettings.getMockImplementation();
+        let availabilityCheckCount = 0;
+        canUpdateSettings.mockImplementation(() => {
+            availabilityCheckCount += 1;
+            if (availabilityCheckCount === 2) {
+                fixture.setStoredSettings({
+                    ...createDefaultSettings(),
+                    excludedHostnames: ["existing.example", "concurrent.example"]
+                });
+            }
+            return checkCanUpdateSettings?.() ?? true;
+        });
+
+        fixture.executeCommand("Exclude This Hostname");
+
+        expect(fixture.store.getSettings().excludedHostnames).toEqual([
+            "existing.example",
+            "concurrent.example",
+            "xn--bcher-kva.example"
+        ]);
+    });
+
+    test("rechecks selector capacity when the list fills while the prompt is open", () => {
+        const selectors = Array.from({ length: MAX_EDITOR_SELECTOR_COUNT }, (_, index) => `.selector-${index}`);
+        const reportStatus = vi.mocked(fixture.environment.reportStatus);
+        vi.mocked(fixture.environment.requestInput).mockImplementationOnce(() => {
+            fixture.setStoredSettings({
+                ...createDefaultSettings(),
+                excludedEditorSelectors: selectors
+            });
+            return ".submitted";
+        });
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+
+        expect(fixture.store.getSettings().excludedEditorSelectors).toEqual(selectors);
+        expect(reportStatus).toHaveBeenCalledWith(
+            `Remove an existing selector before adding more than ${MAX_EDITOR_SELECTOR_COUNT}.`
+        );
+    });
+
+    test("applies the operation shown by stale editing, toolbar, and hostname labels", () => {
+        const disableEditing = fixture.commands.get(1)?.callback;
+        const disableToolbar = fixture.commands.get(2)?.callback;
+        const excludeHostname = fixture.commands.get(8)?.callback;
+        fixture.setStoredSettings({
+            ...createDefaultSettings(),
+            isEnabled: false,
+            isToolbarEnabled: false,
+            excludedHostnames: ["xn--bcher-kva.example"]
+        });
+
+        disableEditing?.();
+        disableToolbar?.();
+        excludeHostname?.();
+
+        expect(fixture.store.getSettings()).toMatchObject({
+            isEnabled: false,
+            isToolbarEnabled: false,
+            excludedHostnames: ["xn--bcher-kva.example"]
+        });
+    });
+
+    test("preserves selector add intent when another tab adds the same selector", () => {
+        vi.mocked(fixture.environment.requestInput).mockImplementationOnce(() => {
+            fixture.setStoredSettings({
+                ...createDefaultSettings(),
+                excludedEditorSelectors: [".submitted"]
+            });
+            return ".submitted";
+        });
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+
+        expect(fixture.store.getSettings().excludedEditorSelectors).toEqual([".submitted"]);
+        expect(fixture.environment.reportStatus).toHaveBeenCalledWith("Editor exclusion selector added: .submitted");
+    });
+
+    test("preserves selector remove intent when another tab removes the same selector", () => {
+        fixture = createFixture("https://example.test/editor", {
+            ...createDefaultSettings(),
+            excludedEditorSelectors: [".submitted"]
+        });
+        vi.mocked(fixture.environment.requestInput).mockImplementationOnce(() => {
+            fixture.setStoredSettings(createDefaultSettings());
+            return ".submitted";
+        });
+
+        fixture.executeCommand("Toggle Editor Exclusion Selector");
+
+        expect(fixture.store.getSettings().excludedEditorSelectors).toEqual([]);
+        expect(fixture.environment.reportStatus).toHaveBeenCalledWith("Editor exclusion selector removed: .submitted");
+    });
+
+    test("refreshes fallback dynamic actions in place after storage recovers", () => {
+        const recoveredSettings = {
+            ...createDefaultSettings(),
+            isEnabled: false,
+            isToolbarEnabled: false,
+            excludedHostnames: ["example.test"]
+        };
+        const getSettings = vi
+            .fn<() => ReturnType<typeof createDefaultSettings>>()
+            .mockImplementationOnce(() => {
+                throw new Error("storage unavailable");
+            })
+            .mockImplementationOnce(() => {
+                throw new Error("storage unavailable");
+            })
+            .mockReturnValue(recoveredSettings);
+        const store: SettingsStore = {
+            canUpdateSettings: () => true,
+            getSettings,
+            subscribeSettings: () => () => undefined,
+            updateSettings: () => recoveredSettings
+        };
+        const commands = new Map<number, { readonly label: string; readonly callback: () => void }>();
+        const registrations: Array<{ readonly id: number; readonly existingCommandId?: number }> = [];
+        let nextCommandId = 1;
+        const controller = registerSettingsMenu(
+            {
+                registerCommand: (label, callback, existingCommandId) => {
+                    const id = existingCommandId ?? nextCommandId++;
+                    commands.set(id, { label, callback });
+                    registrations.push({ id, existingCommandId });
+                    return id;
+                },
+                requestInput: () => null,
+                reportStatus: () => undefined,
+                getPrimaryModifierLabel: () => "Command",
+                getPageUrl: () => new URL("https://example.test/editor")
+            },
+            store
+        );
+
+        expect([...commands.values()].map(({ label }) => label)).toEqual([
+            "Disable Markdown Editing",
+            "Disable Formatting Toolbar",
+            "Set Tab Width",
+            "Set Bullet Style",
+            "Set Bold Shortcut",
+            "Set Italic Shortcut",
+            "Set Link Shortcut",
+            "Exclude This Hostname",
+            "Toggle Editor Exclusion Selector"
+        ]);
+
+        controller.refresh();
+
+        expect([...commands.values()].map(({ label }) => label)).toEqual([
+            "Enable Markdown Editing",
+            "Enable Formatting Toolbar",
+            "Set Tab Width",
+            "Set Bullet Style",
+            "Set Bold Shortcut",
+            "Set Italic Shortcut",
+            "Set Link Shortcut",
+            "Include This Hostname",
+            "Toggle Editor Exclusion Selector"
+        ]);
+        expect(registrations.slice(9).map(({ id, existingCommandId }) => [id, existingCommandId])).toEqual([
+            [1, 1],
+            [2, 2],
+            [8, 8]
+        ]);
+    });
+
+    test("reports only the terminal conflict when a retry also observes a shortcut collision", () => {
+        const defaultSettings = createDefaultSettings();
+        const updateSettingsWithOutcome = vi.fn((update: Parameters<SettingsStore["updateSettings"]>[0]) => {
+            if (typeof update === "function") {
+                update(defaultSettings);
+                update({
+                    ...defaultSettings,
+                    shortcutOverrides: { italic: { key: "x", isPrimaryModifierRequired: true } }
+                });
+            }
+            return { settings: defaultSettings, outcome: "conflict" as const };
+        });
+        const store: SettingsStore = {
+            canUpdateSettings: () => true,
+            getSettings: () => defaultSettings,
+            subscribeSettings: () => () => undefined,
+            updateSettings: () => defaultSettings,
+            updateSettingsWithOutcome
+        };
+        const commands = new Map<string, () => void>();
+        const reportStatus = vi.fn();
+        registerSettingsMenu(
+            {
+                registerCommand: (label, callback) => {
+                    commands.set(label, callback);
+                    return commands.size;
+                },
+                requestInput: () => "Cmd+X",
+                reportStatus,
+                getPrimaryModifierLabel: () => "Command",
+                getPageUrl: () => new URL("https://example.test/editor")
+            },
+            store
+        );
+
+        commands.get("Set Bold Shortcut")?.();
+
+        expect(reportStatus).toHaveBeenCalledTimes(1);
+        expect(reportStatus).toHaveBeenCalledWith("Settings changed repeatedly in another tab. Try the action again.");
     });
 });
