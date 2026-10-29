@@ -266,6 +266,8 @@ describe("Userscript", () => {
             isTopFrame: true
         };
         disposeUserscript = initializeUserscript(environment);
+        const textArea = document.createElement("textarea");
+        document.body.append(textArea);
         const focusListener = addEventListener.mock.calls.find(([eventType]) => String(eventType) === "focus")?.[1];
         const removeDocumentEventListener = vi.spyOn(document, "removeEventListener").mockImplementation(() => {
             throw new Error("runtime disposal unavailable");
@@ -275,6 +277,10 @@ describe("Userscript", () => {
         expect(removeEventListener).toHaveBeenCalledWith("focus", focusListener);
 
         removeDocumentEventListener.mockRestore();
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+        expect(dispatchKey(textArea, "(").defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("value");
         disposeUserscript();
         disposeUserscript = undefined;
     });
@@ -309,12 +315,15 @@ describe("Userscript", () => {
         removeWindowEventListener("focus", focusListener as unknown as EventListener);
     });
 
-    test("keeps the runtime active without registering menus in child frames", () => {
+    test("applies fresh shared settings inside a child context without menus or focus refresh", async () => {
         const addEventListener = vi.spyOn(window, "addEventListener");
         const registerCommand = vi.fn();
+        let storedSettings = createDefaultSettings();
         const environment: UserscriptEnvironment = {
-            readValue: vi.fn(() => createDefaultSettings()),
-            writeValue: vi.fn(),
+            readValue: vi.fn(() => storedSettings),
+            writeValue: vi.fn((_key, settings) => {
+                storedSettings = settings;
+            }),
             registerCommand,
             requestInput: vi.fn(() => null),
             getPrimaryModifierLabel: () => "Command",
@@ -331,5 +340,27 @@ describe("Userscript", () => {
         expect(addEventListener.mock.calls.filter(([eventType]) => String(eventType) === "focus")).toHaveLength(0);
         expect(dispatchKey(textArea, "(").defaultPrevented).toBe(true);
         expect(textArea.value).toBe("(value)");
+        const initialToolbar = document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]");
+        expect(initialToolbar).not.toBeNull();
+
+        storedSettings = { ...storedSettings, isEnabled: false };
+        textArea.value = "value";
+        textArea.setSelectionRange(0, textArea.value.length);
+        expect(dispatchKey(textArea, "(").defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("value");
+        await vi.waitFor(() => expect(initialToolbar?.isConnected).toBe(false));
+        await vi.waitFor(() =>
+            expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull()
+        );
+
+        storedSettings = { ...storedSettings, isEnabled: true, isToolbarEnabled: false, tabWidth: 2 };
+        textArea.value = "a";
+        textArea.setSelectionRange(1, 1);
+        expect(dispatchKey(textArea, "Tab").defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("a ");
+        textArea.dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true }));
+        await vi.waitFor(() =>
+            expect(document.querySelector("[data-tampermonkey-markdown-enhancer-formatting-toolbar]")).toBeNull()
+        );
     });
 });

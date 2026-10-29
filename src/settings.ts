@@ -299,13 +299,31 @@ export const createSettingsStore = (storage: SettingsStorage): SettingsStore => 
     const listeners = new Set<(settings: MarkdownEnhancerSettings) => void>();
     let latestRawValue = rawSettings;
     let currentSettings = normalizeSettings(rawSettings);
+    let isNotifyingSettings = false;
+    let hasPendingSettingsNotification = false;
     if (!hasUnsupportedStoredSchemaVersion(rawSettings) && !areValuesEqual(rawSettings, currentSettings)) {
         storage.writeValue(SETTINGS_STORAGE_KEY, currentSettings);
     }
 
     const notifySettings = (): void => {
-        for (const listener of listeners) {
-            listener(currentSettings);
+        if (isNotifyingSettings) {
+            hasPendingSettingsNotification = true;
+            return;
+        }
+        isNotifyingSettings = true;
+        try {
+            do {
+                hasPendingSettingsNotification = false;
+                const notifiedSettings = currentSettings;
+                for (const listener of [...listeners]) {
+                    if (listeners.has(listener)) {
+                        listener(notifiedSettings);
+                    }
+                }
+            } while (hasPendingSettingsNotification);
+        } finally {
+            isNotifyingSettings = false;
+            hasPendingSettingsNotification = false;
         }
     };
 

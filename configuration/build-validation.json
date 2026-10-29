@@ -13,6 +13,7 @@
     "runtimeMarkers": [
         "initializeUserscript",
         "createSettingsStore",
+        "hasPendingSettingsNotification",
         "registerSettingsMenu",
         "Disable Markdown Editing",
         "Enable Markdown Editing",

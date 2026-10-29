@@ -105,7 +105,15 @@ export const initializeMarkdownEnhancer = (
     });
 
     return () => {
-        disposeFormattingToolbar();
-        disposeEventRouter();
+        try {
+            disposeEventRouter();
+        } catch {
+            // Continue disposing toolbar resources when editor listener cleanup is unavailable.
+        }
+        try {
+            disposeFormattingToolbar();
+        } catch {
+            // Both runtime boundaries become inert before their page-owned cleanup calls.
+        }
     };
 };

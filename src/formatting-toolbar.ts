@@ -1427,6 +1427,9 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     };
 
     const handleFocusIn = (event: FocusEvent): void => {
+        if (isDisposed) {
+            return;
+        }
         if (isToolbarEvent(event)) {
             return;
         }
@@ -1440,6 +1443,9 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     };
 
     const handleEditorStateEvent = (event: Event): void => {
+        if (isDisposed) {
+            return;
+        }
         if (isToolbarEvent(event)) {
             return;
         }
@@ -1465,6 +1471,9 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     };
 
     const handleSelectionChange = (event: Event): void => {
+        if (isDisposed) {
+            return;
+        }
         if (isToolbarFocused()) {
             return;
         }
@@ -1722,6 +1731,9 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     };
 
     const handleDocumentKeydown = (event: KeyboardEvent): void => {
+        if (isDisposed) {
+            return;
+        }
         if (isToolbarEvent(event)) {
             return;
         }
@@ -2069,17 +2081,28 @@ export const attachFormattingToolbar = (options: FormattingToolbarOptions): (() 
     container.addEventListener("focusin", handleToolbarFocusIn);
     const unsubscribeSettings = options.subscribeSettings?.(handleSettingsRefresh);
 
+    const runCleanup = (action: () => void): void => {
+        try {
+            action();
+        } catch {
+            // One page-owned cleanup failure must not block the remaining toolbar teardown.
+        }
+    };
+
     return () => {
+        if (isDisposed) {
+            return;
+        }
         isDisposed = true;
-        disconnectObservers();
-        unsubscribeSettings?.();
-        syncDocumentEventListeners();
-        unsubscribeKeydown();
-        container.removeEventListener("pointerdown", handleToolbarPointerDown);
-        container.removeEventListener("mousedown", handleToolbarPointerDown);
-        container.removeEventListener("click", handleToolbarClick);
-        container.removeEventListener("keydown", handleToolbarKeydown);
-        container.removeEventListener("focusin", handleToolbarFocusIn);
-        removeToolbar();
+        runCleanup(disconnectObservers);
+        runCleanup(() => unsubscribeSettings?.());
+        runCleanup(syncDocumentEventListeners);
+        runCleanup(unsubscribeKeydown);
+        runCleanup(() => container.removeEventListener("pointerdown", handleToolbarPointerDown));
+        runCleanup(() => container.removeEventListener("mousedown", handleToolbarPointerDown));
+        runCleanup(() => container.removeEventListener("click", handleToolbarClick));
+        runCleanup(() => container.removeEventListener("keydown", handleToolbarKeydown));
+        runCleanup(() => container.removeEventListener("focusin", handleToolbarFocusIn));
+        runCleanup(removeToolbar);
     };
 };

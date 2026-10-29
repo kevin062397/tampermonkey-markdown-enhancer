@@ -144,6 +144,7 @@ export const attachEditorEventRouter = (
 ): (() => void) => {
     let focusExitTextArea: HTMLTextAreaElement | null = null;
     let isFocusExitShiftPressed = false;
+    let isDisposed = false;
 
     const clearFocusExit = (): void => {
         focusExitTextArea = null;
@@ -151,6 +152,9 @@ export const attachEditorEventRouter = (
     };
 
     const handleKeydown = (event: KeyboardEvent): void => {
+        if (isDisposed) {
+            return;
+        }
         observeKeydown(event);
         if (event.defaultPrevented || event.isComposing) {
             clearFocusExit();
@@ -181,6 +185,9 @@ export const attachEditorEventRouter = (
         dispatchChangeEventIfRequired(editor, valueBeforeEdit);
     };
     const handlePaste = (event: ClipboardEvent): void => {
+        if (isDisposed) {
+            return;
+        }
         clearFocusExit();
         if (event.defaultPrevented) {
             return;
@@ -211,14 +218,26 @@ export const attachEditorEventRouter = (
     document.addEventListener("compositionstart", clearFocusExit);
     document.addEventListener("compositionend", clearFocusExit);
 
+    const removeDocumentListener = (type: string, listener: EventListener): void => {
+        try {
+            document.removeEventListener(type, listener);
+        } catch {
+            // Disposed listeners remain inert when a page-owned removal override is unavailable.
+        }
+    };
+
     return () => {
+        if (isDisposed) {
+            return;
+        }
+        isDisposed = true;
         clearFocusExit();
-        document.removeEventListener("keydown", handleKeydown);
-        document.removeEventListener("keyup", handleKeyup);
-        document.removeEventListener("paste", handlePaste);
-        document.removeEventListener("input", clearFocusExit);
-        document.removeEventListener("focusout", handleFocusOut);
-        document.removeEventListener("compositionstart", clearFocusExit);
-        document.removeEventListener("compositionend", clearFocusExit);
+        removeDocumentListener("keydown", handleKeydown as EventListener);
+        removeDocumentListener("keyup", handleKeyup as EventListener);
+        removeDocumentListener("paste", handlePaste as EventListener);
+        removeDocumentListener("input", clearFocusExit as EventListener);
+        removeDocumentListener("focusout", handleFocusOut as EventListener);
+        removeDocumentListener("compositionstart", clearFocusExit as EventListener);
+        removeDocumentListener("compositionend", clearFocusExit as EventListener);
     };
 };

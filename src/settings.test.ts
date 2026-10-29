@@ -277,11 +277,17 @@ describe("Settings", () => {
         const storage = createStorage(createDefaultSettings());
         const store = createSettingsStore(storage);
 
-        const updated = store.updateSettings((settings) => ({
-            isEnabled: !settings.isEnabled,
-            tabWidth: 2,
-            excludedHostnames: [" Example.COM. ", "example.com"]
-        }));
+        const updated = store.updateSettings((settings) => {
+            expect(Object.isFrozen(settings)).toBe(true);
+            expect(Object.isFrozen(settings.shortcutOverrides)).toBe(true);
+            expect(Object.isFrozen(settings.excludedHostnames)).toBe(true);
+            expect(Object.isFrozen(settings.excludedEditorSelectors)).toBe(true);
+            return {
+                isEnabled: !settings.isEnabled,
+                tabWidth: 2,
+                excludedHostnames: [" Example.COM. ", "example.com"]
+            };
+        });
         store.updateSettings({ tabWidth: 2 });
 
         expect(updated).toMatchObject({ isEnabled: false, tabWidth: 2, excludedHostnames: ["example.com"] });
@@ -302,6 +308,44 @@ describe("Settings", () => {
         unsubscribe();
         store.updateSettings({ isToolbarEnabled: true });
         expect(listener).toHaveBeenCalledOnce();
+    });
+
+    test("queues reentrant changes and uses stable subscriber snapshots", () => {
+        const storage = createStorage(createDefaultSettings());
+        const store = createSettingsStore(storage);
+        const calls: string[] = [];
+        let hasAddedLateListener = false;
+        let hasQueuedUpdate = false;
+        let removeSecondListener = (): void => undefined;
+        const handleLateSettings = (settings: MarkdownEnhancerSettings): void => {
+            calls.push(`late:${settings.tabWidth}`);
+        };
+        const handleFirstSettings = (settings: MarkdownEnhancerSettings): void => {
+            calls.push(`first:${settings.tabWidth}`);
+            expect(Object.isFrozen(settings)).toBe(true);
+            expect(Object.isFrozen(settings.shortcutOverrides)).toBe(true);
+            expect(Object.isFrozen(settings.excludedHostnames)).toBe(true);
+            expect(Object.isFrozen(settings.excludedEditorSelectors)).toBe(true);
+            if (!hasAddedLateListener) {
+                hasAddedLateListener = true;
+                store.subscribeSettings(handleLateSettings);
+                removeSecondListener();
+            }
+            if (!hasQueuedUpdate) {
+                hasQueuedUpdate = true;
+                store.updateSettings({ tabWidth: 8 });
+            }
+        };
+        const handleSecondSettings = (settings: MarkdownEnhancerSettings): void => {
+            calls.push(`second:${settings.tabWidth}`);
+        };
+        store.subscribeSettings(handleFirstSettings);
+        removeSecondListener = store.subscribeSettings(handleSecondSettings);
+
+        store.updateSettings({ isToolbarEnabled: false });
+
+        expect(calls).toEqual(["first:4", "first:8", "late:8"]);
+        expect(store.getSettings()).toMatchObject({ isToolbarEnabled: false, tabWidth: 8 });
     });
 
     test("normalizes one valid editor selector per line while preserving selector-list commas", () => {

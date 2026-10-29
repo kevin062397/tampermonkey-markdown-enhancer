@@ -115,6 +115,23 @@ describe("Editor event router focus exit", () => {
         expect(textArea.value).toBe("page value");
     });
 
+    test("makes retained listeners inert when disposal cleanup throws", () => {
+        const textArea = createTextArea();
+        resetTextArea(textArea);
+        textArea.setSelectionRange(0, textArea.value.length);
+        disposeRouter = attachEditorEventRouter(createResolver([textArea]));
+        const removeEventListener = vi.spyOn(document, "removeEventListener").mockImplementation(() => {
+            throw new Error("listener removal unavailable");
+        });
+
+        expect(() => disposeRouter?.()).not.toThrow();
+        removeEventListener.mockRestore();
+        const event = dispatchKey(textArea, "(");
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("plain");
+    });
+
     test("allows one native Tab or Shift+Tab after Escape", () => {
         const textArea = createTextArea();
         disposeRouter = attachEditorEventRouter(createResolver([textArea]));
