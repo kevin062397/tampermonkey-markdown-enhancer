@@ -29,6 +29,7 @@
         "Style:",
         "menuitemradio",
         "continueMarkdownLine",
+        "isUnmodifiedEscape",
         "resolveEditorFromPath",
         "attachFormattingToolbar",
         "generic-textarea",

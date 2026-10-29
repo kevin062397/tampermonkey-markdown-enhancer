@@ -41,6 +41,23 @@ const isPrimaryModifierPressed = (event: KeyboardEvent): boolean => {
     return isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 };
 
+const isUnmodifiedEscape = (event: KeyboardEvent): boolean =>
+    event.key === "Escape" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+
+const isUnmodifiedShiftPress = (event: KeyboardEvent): boolean =>
+    event.key === "Shift" && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
+
+const isUnmodifiedTab = (event: KeyboardEvent): boolean =>
+    event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey;
+
+const isEventFromTextArea = (event: Event, textArea: HTMLTextAreaElement): boolean => {
+    try {
+        return event.composedPath().includes(textArea);
+    } catch {
+        return event.target === textArea;
+    }
+};
+
 const handleEditorKeydown = (
     event: KeyboardEvent,
     textArea: HTMLTextAreaElement,
@@ -97,9 +114,8 @@ const handleEditorKeydown = (
         }
     }
 
-    if (event.key === "Tab" && event.shiftKey && isEditingModifierAllowed) {
+    if (event.key === "Tab" && event.shiftKey && isEditingModifierAllowed && outdentCommand(textArea, tabWidth)) {
         event.preventDefault();
-        outdentCommand(textArea, tabWidth);
     }
 };
 
@@ -123,19 +139,46 @@ export const attachEditorEventRouter = (
     resolveEditor: EditorEventResolver,
     observeKeydown: EditorKeydownObserver = () => undefined
 ): (() => void) => {
+    let focusExitTextArea: HTMLTextAreaElement | null = null;
+    let isFocusExitShiftPressed = false;
+
+    const clearFocusExit = (): void => {
+        focusExitTextArea = null;
+        isFocusExitShiftPressed = false;
+    };
+
     const handleKeydown = (event: KeyboardEvent): void => {
         observeKeydown(event);
         if (event.defaultPrevented || event.isComposing) {
+            clearFocusExit();
             return;
         }
         const editor = resolveEditor(event);
-        if (editor) {
-            const valueBeforeEdit = editor.textArea.value;
-            handleEditorKeydown(event, editor.textArea, editor.commandRegistry, editor.tabWidth);
-            dispatchChangeEventIfRequired(editor, valueBeforeEdit);
+        if (!editor) {
+            clearFocusExit();
+            return;
         }
+        if (isUnmodifiedEscape(event)) {
+            focusExitTextArea = editor.textArea;
+            isFocusExitShiftPressed = false;
+            return;
+        }
+        if (focusExitTextArea === editor.textArea && isUnmodifiedShiftPress(event)) {
+            isFocusExitShiftPressed = true;
+            return;
+        }
+        const shouldAllowFocusExit = focusExitTextArea === editor.textArea && isUnmodifiedTab(event);
+        clearFocusExit();
+        if (shouldAllowFocusExit) {
+            return;
+        }
+
+        const valueBeforeEdit = editor.textArea.value;
+        handleEditorKeydown(event, editor.textArea, editor.commandRegistry, editor.tabWidth);
+        dispatchChangeEventIfRequired(editor, valueBeforeEdit);
     };
     const handlePaste = (event: ClipboardEvent): void => {
+        clearFocusExit();
         if (event.defaultPrevented) {
             return;
         }
@@ -146,12 +189,33 @@ export const attachEditorEventRouter = (
             dispatchChangeEventIfRequired(editor, valueBeforeEdit);
         }
     };
+    const handleKeyup = (event: KeyboardEvent): void => {
+        if (event.key === "Shift" && isFocusExitShiftPressed) {
+            clearFocusExit();
+        }
+    };
+    const handleFocusOut = (event: FocusEvent): void => {
+        if (focusExitTextArea && isEventFromTextArea(event, focusExitTextArea)) {
+            clearFocusExit();
+        }
+    };
 
     document.addEventListener("keydown", handleKeydown);
+    document.addEventListener("keyup", handleKeyup);
     document.addEventListener("paste", handlePaste);
+    document.addEventListener("input", clearFocusExit);
+    document.addEventListener("focusout", handleFocusOut);
+    document.addEventListener("compositionstart", clearFocusExit);
+    document.addEventListener("compositionend", clearFocusExit);
 
     return () => {
+        clearFocusExit();
         document.removeEventListener("keydown", handleKeydown);
+        document.removeEventListener("keyup", handleKeyup);
         document.removeEventListener("paste", handlePaste);
+        document.removeEventListener("input", clearFocusExit);
+        document.removeEventListener("focusout", handleFocusOut);
+        document.removeEventListener("compositionstart", clearFocusExit);
+        document.removeEventListener("compositionend", clearFocusExit);
     };
 };

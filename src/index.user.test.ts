@@ -522,6 +522,29 @@ describe("Markdown Enhancer", () => {
         expect(textArea.value).toBe("review");
     });
 
+    test("allows one native focus traversal after Escape and then resumes Tab editing", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "ab";
+        textArea.setSelectionRange(2, 2);
+        await loadEnhancer();
+
+        expect(dispatchKey(textArea, "Escape").defaultPrevented).toBe(false);
+        expect(dispatchKey(textArea, "Tab").defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("ab");
+
+        expect(dispatchKey(textArea, "Tab").defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("ab  ");
+
+        textArea.value = "    item";
+        textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+        dispatchKey(textArea, "Escape");
+        expect(dispatchKey(textArea, "Shift", { shiftKey: true }).defaultPrevented).toBe(false);
+        expect(dispatchKey(textArea, "Tab", { shiftKey: true }).defaultPrevented).toBe(false);
+        expect(textArea.value).toBe("    item");
+        expect(dispatchKey(textArea, "Tab", { shiftKey: true }).defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("item");
+    });
+
     test("continues Markdown structures with Enter", async () => {
         const textArea = createSupportedEditor();
         await loadEnhancer();
@@ -728,7 +751,12 @@ describe("Markdown Enhancer", () => {
         createSupportedEditor();
 
         expect(addEventListener.mock.calls.filter(([type]) => type === "keydown")).toHaveLength(1);
+        expect(addEventListener.mock.calls.filter(([type]) => type === "keyup")).toHaveLength(1);
         expect(addEventListener.mock.calls.filter(([type]) => type === "paste")).toHaveLength(1);
+        expect(addEventListener.mock.calls.filter(([type]) => type === "input")).toHaveLength(1);
+        expect(addEventListener.mock.calls.filter(([type]) => type === "focusout")).toHaveLength(1);
+        expect(addEventListener.mock.calls.filter(([type]) => type === "compositionstart")).toHaveLength(1);
+        expect(addEventListener.mock.calls.filter(([type]) => type === "compositionend")).toHaveLength(1);
     });
 
     test("does not indent a line touched only by a selection ending at its start", async () => {

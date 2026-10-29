@@ -288,9 +288,12 @@ export const insertSpaces = (state: EditorState, tabSize: number): EditOperation
     );
 };
 
-export const outdentSelectedLines = (state: EditorState, tabSize: number): EditOperation => {
+export const outdentSelectedLines = (state: EditorState, tabSize: number): EditOperation | null => {
     const range = getSelectedLineRange(state);
     const removedSpacesByLine = range.lines.map((line) => countLeadingSpaces(line, tabSize));
+    if (removedSpacesByLine.every((removedSpaces) => removedSpaces === 0)) {
+        return null;
+    }
     const text = range.lines.map((line, index) => line.slice(removedSpacesByLine[index])).join("\n");
     return createEdit(
         state,
