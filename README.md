@@ -10,15 +10,16 @@ The userscript applies to connected, writable textareas under the universal `@ma
 
 The primary modifier is `Command` on macOS and `Control` on other platforms.
 
-| Action                                                                               | Shortcut               |
-| ------------------------------------------------------------------------------------ | ---------------------- |
-| Toggle bold                                                                          | Primary modifier + `B` |
-| Toggle italic                                                                        | Primary modifier + `I` |
-| Insert a Markdown link                                                               | Primary modifier + `K` |
-| Focus the formatting toolbar                                                         | `Alt+F10`              |
-| Indent selected lines or the current bullet, numbered, task-list, or blockquote line | `Tab`                  |
-| Outdent selected lines or the current line                                           | `Shift+Tab`            |
-| Continue or exit a Markdown line prefix                                              | `Enter`                |
+| Action                                                                               | Shortcut                            |
+| ------------------------------------------------------------------------------------ | ----------------------------------- |
+| Toggle bold                                                                          | Primary modifier + `B`              |
+| Toggle italic                                                                        | Primary modifier + `I`              |
+| Insert a Markdown link                                                               | Primary modifier + `K`              |
+| Focus the formatting toolbar                                                         | `Alt+F10`                           |
+| Let the next focus-navigation key leave the editor                                   | `Escape`, then `Tab` or `Shift+Tab` |
+| Indent selected lines or the current bullet, numbered, task-list, or blockquote line | `Tab`                               |
+| Outdent selected lines or the current line                                           | `Shift+Tab`                         |
+| Continue or exit a Markdown line prefix                                              | `Enter`                             |
 
 Bold and italic toggles preserve boundary whitespace and correctly transition existing asterisk marker depth. Link insertion turns selected text into `[text](url)` with the `url` placeholder selected; selecting a URL creates `[link text](url)` with the label selected.
 
@@ -43,9 +44,15 @@ The runtime includes commands for bold, italic, strikethrough, inline code, fenc
 
 ## Formatting Toolbar
 
-Focusing an eligible textarea mounts one compact formatting toolbar beside it. Bold, italic, strikethrough, inline code, and link are available directly; **More formatting commands** contains code block, heading, blockquote, and list actions. Controls are enabled only when their registry commands can run in the current selection context.
+Focusing an eligible textarea mounts one compact formatting toolbar beside it. Bold, italic, strikethrough, inline code, and link are icon buttons. The **Style** control shows the active block style with its icon, label, and a trailing chevron. Its grouped menu provides Text, Heading 1–6, Blockquote, Code Block, Bullet List, Numbered List, and Task List. A selection containing several block styles is labeled **Mixed**. Style commands apply to the selected lines or the cursor’s current line. Additional editor actions appear with icons and labels in **More formatting commands** when available.
 
-Press `Alt+F10` from the textarea to focus the toolbar. Use Left and Right Arrow, Home, and End to move among its primary controls. The overflow menu supports Up and Down Arrow, Home, End, and Escape. Executing a command restores editor focus and preserves the same behavior as its keyboard command. The toolbar follows the active textarea and cleans up when editors are replaced.
+The toolbar uses light and dark palettes. It follows the editor’s computed color scheme, nearby page theme attributes, or the browser’s preferred scheme, and updates as those signals change. High-contrast (forced colors) mode is supported.
+
+Press `Alt+F10` from the textarea to focus the toolbar. Use Left and Right Arrow, Home, and End to move among its primary controls. The Style menu and any More menu support Up and Down Arrow, Home, End, and Escape. A primary pointer action elsewhere closes an open menu, then the selected page control handles the action normally. Executing a command restores editor focus and preserves the same behavior as its keyboard command. Press `Escape` in the textarea before `Tab` or `Shift+Tab` to let that next key move focus through the page; later Tab presses resume Markdown indentation. The toolbar follows the active textarea and cleans up when editors are replaced.
+
+## Browser Compatibility
+
+Current Chrome and Firefox releases with Tampermonkey are supported. After changes to the generated runtime, editor interaction, toolbar behavior, settings, or browser integration, check each browser for editor discovery and toolbar placement; keyboard, direct icon, and Style commands; outside-pointer dismissal; `Alt+F10` navigation and `Escape`-then-Tab focus exit; light, dark, and forced-colors palettes; settings actions; and cleanup after an editor is replaced.
 
 ## Settings
 
