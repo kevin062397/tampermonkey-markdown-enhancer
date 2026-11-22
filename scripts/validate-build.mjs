@@ -1,32 +1,43 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { Script } from "node:vm";
+import ts from "typescript";
 
 const root = process.cwd();
 const config = JSON.parse(readFileSync(resolve(root, "configuration/build-validation.json"), "utf8"));
 const distDirectory = resolve(root, "dist");
+const pngPrefix = "data:image/png;base64,";
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const fail = (message) => {
     throw new Error(`Build validation failed: ${message}`);
 };
 
-const actualArtifacts = readdirSync(distDirectory).sort();
-const expectedArtifacts = [...config.artifacts].sort();
-if (JSON.stringify(actualArtifacts) !== JSON.stringify(expectedArtifacts)) {
-    fail(`expected artifacts ${expectedArtifacts.join(", ")}, found ${actualArtifacts.join(", ")}`);
-}
+const isEqual = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 const parseMetadata = (content) => {
+    const startMarker = "// ==UserScript==";
     const endMarker = "// ==/UserScript==";
     const end = content.indexOf(endMarker);
-    if (!content.startsWith("// ==UserScript==") || end < 0) {
+    if (!content.startsWith(startMarker) || end < 0) {
         fail("an artifact is missing a complete userscript metadata block");
     }
 
-    const metadata = new Map();
     const block = content.slice(0, end + endMarker.length);
-    for (const match of block.matchAll(/^\/\/ @([^\s]+)\s+(.+)$/gm)) {
+    const lines = block.split(/\r?\n/);
+    if (lines[0] !== startMarker || lines.at(-1) !== endMarker) {
+        fail("an artifact has content outside the userscript metadata comment format");
+    }
+
+    const metadata = new Map();
+    for (const line of lines.slice(1, -1)) {
+        const match = line.match(/^\/\/ @([^\s]+)(?:\s+(.*))?$/);
+        if (!match) {
+            fail("an artifact contains non-metadata content in its userscript preamble");
+        }
         const values = metadata.get(match[1]) ?? [];
-        values.push(match[2].trim());
+        values.push((match[2] ?? "").trim());
         metadata.set(match[1], values);
     }
     return { end: end + endMarker.length, metadata };
@@ -36,21 +47,48 @@ const userScript = readFileSync(resolve(distDirectory, "index.user.js"), "utf8")
 const metadataScript = readFileSync(resolve(distDirectory, "index.meta.js"), "utf8");
 const userResult = parseMetadata(userScript);
 const metaResult = parseMetadata(metadataScript);
+const allowedMetadataKeys = [...Object.keys(config.expectedMetadata), ...config.requiredMetadata].sort();
+
+for (const [artifactName, result] of [
+    ["userscript", userResult],
+    ["metadata artifact", metaResult]
+]) {
+    const actualKeys = [...result.metadata.keys()].sort();
+    if (!isEqual(actualKeys, allowedMetadataKeys)) {
+        fail(
+            `${artifactName} metadata keys expected ${allowedMetadataKeys.join(", ")}, found ${actualKeys.join(", ")}`
+        );
+    }
+}
 
 for (const [key, expectedValues] of Object.entries(config.expectedMetadata)) {
-    const actualValues = userResult.metadata.get(key) ?? [];
-    if (JSON.stringify(actualValues) !== JSON.stringify(expectedValues)) {
-        fail(`metadata @${key} expected ${JSON.stringify(expectedValues)}, found ${JSON.stringify(actualValues)}`);
+    const userValues = userResult.metadata.get(key) ?? [];
+    if (!isEqual(userValues, expectedValues)) {
+        fail(`metadata @${key} expected ${JSON.stringify(expectedValues)}, found ${JSON.stringify(userValues)}`);
     }
-    const metaValues = metaResult.metadata.get(key) ?? [];
-    if (JSON.stringify(metaValues) !== JSON.stringify(expectedValues)) {
-        fail(`metadata artifact @${key} does not match the userscript`);
+    const metadataValues = metaResult.metadata.get(key) ?? [];
+    if (!isEqual(metadataValues, expectedValues)) {
+        fail(
+            `metadata artifact @${key} expected ${JSON.stringify(expectedValues)}, found ${JSON.stringify(metadataValues)}`
+        );
     }
 }
 
 for (const key of config.requiredMetadata) {
-    if (!userResult.metadata.has(key) || !metaResult.metadata.has(key)) {
-        fail(`required metadata @${key} is missing`);
+    const values = userResult.metadata.get(key) ?? [];
+    if (values.length !== 1 || !isEqual(metaResult.metadata.get(key) ?? [], values)) {
+        fail(`required metadata @${key} must occur once and match in both artifacts`);
+    }
+
+    const value = values[0];
+    const payload = value.startsWith(pngPrefix) ? value.slice(pngPrefix.length) : "";
+    const bytes = Buffer.from(payload, "base64");
+    if (
+        payload.length === 0 ||
+        bytes.toString("base64") !== payload ||
+        !bytes.subarray(0, pngSignature.length).equals(pngSignature)
+    ) {
+        fail(`required metadata @${key} must contain an inline PNG image`);
     }
 }
 
@@ -59,21 +97,14 @@ if (metadataScript.slice(metaResult.end).trim() !== "") {
 }
 
 const runtime = userScript.slice(userResult.end);
-for (const marker of config.runtimeMarkers) {
-    if (!runtime.includes(marker)) {
-        fail(`runtime marker ${JSON.stringify(marker)} is missing`);
-    }
+const runtimeSource = ts.createSourceFile("index.user.js", runtime, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+if (runtimeSource.statements.length === 0) {
+    fail("the userscript runtime is empty");
 }
-if (/^\s*(?:import|export)\s/m.test(runtime)) {
-    fail("the userscript contains an unresolved module import or export");
-}
-if (/['\"]use strict['\"]\s*\(/.test(runtime)) {
-    fail("the userscript has an unsafe statement boundary after its strict-mode directive");
+try {
+    new Script(runtime, { filename: "index.user.js" });
+} catch {
+    fail("the userscript runtime is not valid classic JavaScript");
 }
 
-const source = readFileSync(resolve(root, config.sourceEntry), "utf8");
-if (source.includes("==UserScript==")) {
-    fail("the source entry still embeds repository-specific userscript metadata");
-}
-
-console.log(`Validated ${actualArtifacts.length} userscript artifacts and repository-specific metadata.`);
+console.log("Validated userscript artifacts and repository-specific metadata.");

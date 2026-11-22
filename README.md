@@ -79,22 +79,24 @@ To update the userscript, pull the repository changes, run `npm ci` and `npm run
 
 ## Development
 
-Install dependencies and run the development checks:
+Install dependencies and run the authoritative verification command:
 
 ```sh
 npm ci
-npm run build
+npm run verify
 ```
 
-The required verification is:
+`npm run verify` checks formatting without rewriting files, runs strict TypeScript checking, executes the full Vitest suite, and builds and validates the userscript artifacts.
+
+Production builds run the formatter first. To format without building, run:
 
 ```sh
-npm run build && npm run test
+npm run format
 ```
 
-The build emits and validates exactly:
+The production build emits exactly:
 
 - `dist/index.user.js`: the installable userscript.
 - `dist/index.meta.js`: the Tampermonkey metadata block.
 
-Build commands generate both artifacts. Tests are colocated with their source modules and run through Vitest in the shared Vite configuration.
+`npm run validate:build` checks both generated files. Unit tests are colocated with their source modules, and Vitest configuration remains in `vite.config.ts`. Generated artifacts are ignored.
