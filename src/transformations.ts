@@ -318,16 +318,63 @@ export const escapeMarkdownLinkDestination = (destination: string): string =>
         .replace(/</g, "%3C")
         .replace(/>/g, "%3E");
 
+const hasMarkdownLinkLabelBefore = (value: string, closingBracketIndex: number): boolean => {
+    let nestedBracketDepth = 0;
+    for (let position = closingBracketIndex - 1; position >= 0; position -= 1) {
+        if (isCharacterEscaped(value, position)) {
+            continue;
+        }
+        if (value[position] === "]") {
+            nestedBracketDepth += 1;
+        } else if (value[position] === "[") {
+            if (nestedBracketDepth === 0) {
+                return true;
+            }
+            nestedBracketDepth -= 1;
+        }
+    }
+    return false;
+};
+
+const isSelectedMarkdownLinkDestination = (state: EditorState): boolean => {
+    const openingParenthesisIndex = state.selectionStart - 1;
+    const closingParenthesisIndex = state.selectionEnd;
+    const closingBracketIndex = openingParenthesisIndex - 1;
+    return (
+        state.selectionStart < state.selectionEnd &&
+        state.value[openingParenthesisIndex] === "(" &&
+        !isCharacterEscaped(state.value, openingParenthesisIndex) &&
+        state.value[closingParenthesisIndex] === ")" &&
+        !isCharacterEscaped(state.value, closingParenthesisIndex) &&
+        state.value[closingBracketIndex] === "]" &&
+        !isCharacterEscaped(state.value, closingBracketIndex) &&
+        hasMarkdownLinkLabelBefore(state.value, closingBracketIndex)
+    );
+};
+
 export const createMarkdownLinkFromPaste = (state: EditorState, pasteText: string): EditOperation | null => {
     const contentState = getNonWhitespaceSelection(state);
     if (!contentState || !isHyperlink(pasteText)) {
         return null;
     }
 
+    const destination = escapeMarkdownLinkDestination(pasteText.trim());
+    if (isSelectedMarkdownLinkDestination(contentState)) {
+        const cursor = contentState.selectionStart + destination.length;
+        return createEdit(
+            contentState,
+            contentState.selectionStart,
+            contentState.selectionEnd,
+            destination,
+            cursor,
+            cursor,
+            "none"
+        );
+    }
+
     const label = escapeMarkdownLinkLabel(
         contentState.value.slice(contentState.selectionStart, contentState.selectionEnd)
     );
-    const destination = escapeMarkdownLinkDestination(pasteText.trim());
     const text = `[${label}](${destination})`;
     const cursor = contentState.selectionStart + text.length;
     return createEdit(

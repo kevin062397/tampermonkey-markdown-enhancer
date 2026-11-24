@@ -687,6 +687,82 @@ describe("Markdown Enhancer", () => {
         expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([41, 41]);
     });
 
+    test("replaces the selected destination created by the Link command when pasting a URL", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "sample_text";
+        textArea.setSelectionRange(0, textArea.value.length);
+        await loadEnhancer();
+
+        dispatchShortcut(textArea, "k");
+        expect(textArea.value).toBe("[sample_text](url)");
+        expect(textArea.value.slice(textArea.selectionStart, textArea.selectionEnd)).toBe("url");
+
+        const event = dispatchPaste(textArea, "https://example.com");
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe("[sample_text](https://example.com)");
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([33, 33]);
+    });
+
+    test.each(["sample_(text", "a [b] c", String.raw`a \[ b`])(
+        "replaces a selected destination after the link label %s",
+        async (label) => {
+            const textArea = createSupportedEditor();
+            textArea.value = label;
+            textArea.setSelectionRange(0, textArea.value.length);
+            await loadEnhancer();
+
+            dispatchShortcut(textArea, "k");
+            const labelEnd = textArea.value.lastIndexOf("](");
+            expect(textArea.value.slice(labelEnd + 2, -1)).toBe("url");
+
+            const event = dispatchPaste(textArea, "https://example.com");
+            const expected = `${textArea.value.slice(0, labelEnd + 2)}https://example.com)`;
+
+            expect(event.defaultPrevented).toBe(true);
+            expect(textArea.value).toBe(expected);
+            expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([
+                expected.length - 1,
+                expected.length - 1
+            ]);
+        }
+    );
+
+    test("escapes a URL that replaces an existing Markdown link destination", async () => {
+        const textArea = createSupportedEditor();
+        textArea.value = "[sample_text](url)";
+        const destinationStart = textArea.value.indexOf("url");
+        textArea.setSelectionRange(destinationStart, destinationStart + "url".length);
+        await loadEnhancer();
+
+        const event = dispatchPaste(textArea, "https://example.com/a_(b)<c>");
+        const expected = String.raw`[sample_text](https://example.com/a_\(b\)%3Cc%3E)`;
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe(expected);
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([expected.length - 1, expected.length - 1]);
+    });
+
+    test.each([
+        ["plain parentheses", "(word)", "word", "([word](https://example.com))"],
+        ["a partial destination", "[sample](prefix)", "fix", "[sample](pre[fix](https://example.com))"],
+        ["an escaped closing bracket", String.raw`\](word)`, "word", String.raw`\]([word](https://example.com))`],
+        ["an earlier balanced label", "[a] b](word)", "word", "[a] b]([word](https://example.com))"],
+        ["no label opener", "x](word)", "word", "x]([word](https://example.com))"]
+    ])("keeps smart-link wrapping for %s", async (_name, value, selection, expected) => {
+        const textArea = createSupportedEditor();
+        textArea.value = value;
+        const selectionStart = value.indexOf(selection);
+        textArea.setSelectionRange(selectionStart, selectionStart + selection.length);
+        await loadEnhancer();
+
+        const event = dispatchPaste(textArea, "https://example.com");
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(textArea.value).toBe(expected);
+        expect([textArea.selectionStart, textArea.selectionEnd]).toEqual([expected.length - 1, expected.length - 1]);
+    });
+
     test("escapes Markdown-sensitive pasted links while preserving selected whitespace", async () => {
         const textArea = createSupportedEditor();
         textArea.value = "  [docs]\\guide  ";
